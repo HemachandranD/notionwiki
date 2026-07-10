@@ -23,10 +23,53 @@ Consult the design doc before adding code and keep it updated as implementation 
 
 ## Current State
 
-- The .gitignore is the standard Python template, so this is intended to be a Python project. No package manager (pip/uv/poetry/pdm) has been chosen yet.
-- There are no build, lint, or test commands to run. Once project scaffolding is added (e.g., pyproject.toml, source layout, test framework), update this file with the actual commands.
+Roadmap 0.1–0.5 implemented: `src/notion_wiki/` (Notion API client, block→markdown converter,
+SQLite state store, ingestion pull loop, CLI, OS scheduling, wiki graph tooling, optional daemon)
+plus a full `tests/` suite (all HTTP mocked via `respx`; no live Notion workspace required).
 
-## When Adding Initial Code
+**Package manager:** `uv`, Python ≥3.11.
 
-- Update this file with the chosen package manager, how to install dependencies, and how to run the app and tests (including a single test).
-- Document the bridge architecture (Notion API integration, the pull/convert/write ingestion loop, overwrite+archive semantics) here once it takes shape, since that is the core of this project.
+```bash
+uv sync --extra graph --extra daemon   # install with optional extras (graph UI, long-lived daemon)
+uv run pytest                          # run the full test suite
+uv run pytest tests/test_convert_blocks.py -q          # a single test file
+uv run pytest tests/test_convert_blocks.py::test_plain_paragraph  # a single test
+uv run ruff check src tests            # lint
+uv run notion-wiki --help              # run the CLI in place (alias: `uv run nw`)
+```
+
+**Architecture (matches `docs/design.md` §12):**
+
+- `notion/` — `NotionClient` (httpx, token-bucket rate limit + 429/5xx backoff), dataclass models
+  (`Page`, `Block`, `RichText`, `DatabaseRow`), `fetch_block_tree` (recursion gated per §5.2:
+  read-only islands and toggles past depth 3 are marked `truncated`, never fetched further).
+- `convert/` — `blocks.py` (pure block-tree → markdown, no network; the "critical suite"),
+  `assets.py` (content-hash-named downloads), `database.py` (row property tables).
+- `store/` — `db.py` (SQLite `pages`/`runs`/`meta`), `lock.py` (cross-platform single-instance
+  file lock: `msvcrt`/`fcntl`), `archive.py` (timestamped copy-before-overwrite).
+- `ingest/` — `poller.py` (incremental search + full sweep), `writer.py` (content hashing,
+  outcome decision incl. the settle window, frontmatter rendering), `daemon_log.py`
+  (`daemon_log.md` ledger, parse/format/rotate), `pull.py` (`PullRunner` orchestration).
+- `cli.py` — Typer app: `init` (interactive wizard), `pull`, `status`, `open`, `graph`, `lint`,
+  `service install|uninstall|status`, `daemon`. Welcome banner suppressed on `--json`/`--quiet`/
+  non-TTY output (§8.2).
+- `schedule/` — one `Scheduler` implementation per OS (`windows.py` schtasks, `macos.py` launchd,
+  `linux.py` systemd user timer + headless Secret Service detection), dispatched by
+  `detect_scheduler()`.
+- `graph/` — `scanner.py`/`index_gen.py`/`graph_gen.py`/`lint.py` (pure wiki-layer tooling, no
+  Notion dependency) + `server.py` (FastAPI, vendored force-directed UI, `127.0.0.1:7777` only).
+- `daemon.py` — optional long-lived loop (APScheduler), lazy-imported behind the `[daemon]` extra.
+
+**Deviations from `docs/design.md` filled in during implementation** (see the plan file for full
+reasoning): Notion API pinned to version `2022-06-28`; `tomli-w` added for writing `config.toml`
+(§12 names `pyyaml`, which is actually for raw-file frontmatter, not config); `respx` added as a
+dev-only test dependency; database scope (§14.2) is resolved once at `init` time into an explicit
+`[[notion.databases]]` list rather than a live "all".
+
+## When Adding Code
+
+- Keep `docs/design.md` and this file in sync as implementation diverges further (e.g. a real
+  page-tree traversal for the full sweep instead of exhaustive Search, embeddings/hybrid search
+  per §14.3, daemon-enforced `raw/` immutability).
+- No live Notion workspace has been used against this codebase yet — `notion-wiki init` and a
+  first `notion-wiki pull` against a real integration token are the natural next manual test.
