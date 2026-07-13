@@ -20,6 +20,7 @@ from notion_wiki.ingest.poller import (
     full_sweep_pages,
     incremental_candidates,
 )
+from notion_wiki.ingest.scope import ScopeResolver
 from notion_wiki.ingest.writer import Outcome, SourceDocument, content_hash, decide_outcome
 from notion_wiki.notion.client import NotionClient
 from notion_wiki.notion.models import Page
@@ -118,10 +119,12 @@ class PullRunner:
         *,
         full: bool = False,
         databases: list[tuple[str, str]] | None = None,
+        root_page_ids: list[str] | None = None,
         now: datetime | None = None,
     ) -> PullStats:
         now = now or datetime.now(UTC)
         databases = databases or []
+        scope = ScopeResolver(self.client, root_page_ids or [])
 
         lock = SingleInstanceLock(self._lock_path) if self._lock_path else None
         if lock:
@@ -146,6 +149,8 @@ class PullRunner:
                 )
             )
             for page in pages:
+                if not scope.in_scope(page):
+                    continue
                 self._process(page, kind="page", database_name=None, stats=stats, now=now)
 
             for database_id, database_name in databases:

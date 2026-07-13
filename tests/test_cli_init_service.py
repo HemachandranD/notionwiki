@@ -63,7 +63,7 @@ def test_init_scaffolds_wiki_and_writes_config(tmp_path: Path, state_env, monkey
 
     config = load_config(state_env / "config.toml")
     assert config.wiki_root == wiki_root
-    assert config.root_page_id == "root1"
+    assert config.root_page_ids == ["root1"]
     assert config.interval_minutes == 1
 
 

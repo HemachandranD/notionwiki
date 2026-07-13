@@ -1,6 +1,6 @@
 [project]
 name = "notionwiki"
-version = "0.1.0"
+version = "0.1.1"
 description = "One-way ingestion bridge: pulls a Notion workspace into the raw layer of an LLM Wiki"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -12,6 +12,7 @@ dependencies = [
     "typer>=0.12",
     "rich>=13.0",
     "tomli-w>=1.0",
+    "questionary>=2.0",
 ]
 
 [project.optional-dependencies]

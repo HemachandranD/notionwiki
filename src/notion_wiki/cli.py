@@ -159,21 +159,183 @@ def _database_title(db: dict) -> str:
     return "".join(rt.get("plain_text", "") for rt in db.get("title", [])) or "Untitled database"
 
 
-def _prompt_root_page(candidates: list) -> tuple[str, str]:
+_tui_state: bool | None = None
+
+
+def _tui_available() -> bool:
+    """Whether the questionary/prompt_toolkit TUI can actually run here.
+
+    A plain `isatty()` check isn't enough: on Git Bash / mintty on Windows the
+    stream is a tty but prompt_toolkit raises NoConsoleScreenBufferError. We
+    probe once (creating a prompt_toolkit output) and cache the result; piped
+    input (tests, CI, `init < answers.txt`) and unsupported terminals both fall
+    back to line prompts."""
+    global _tui_state
+    if _tui_state is not None:
+        return _tui_state
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        _tui_state = False
+        return False
+    try:
+        from prompt_toolkit.output.defaults import create_output
+
+        create_output()
+        _tui_state = True
+    except Exception:  # noqa: BLE001 - any probe failure means "no TUI, use fallback"
+        _tui_state = False
+    return _tui_state
+
+
+def _disable_tui() -> None:
+    """Latch the TUI off after a runtime failure so we don't retry it per prompt."""
+    global _tui_state
+    _tui_state = False
+
+
+def _mask_secret(secret: str) -> str:
+    secret = secret.strip()
+    if not secret:
+        return "(empty)"
+    if len(secret) <= 8:
+        return "*" * len(secret)
+    return f"{secret[:4]}...{secret[-4:]} ({len(secret)} chars)"
+
+
+def _ask_path(label: str, default: str) -> Path:
+    if _tui_available():
+        try:
+            import questionary
+
+            answer = questionary.path(label, default=default, only_directories=True).ask()
+            if answer is None:
+                raise typer.Abort()
+            return Path(answer.strip() or default).expanduser()
+        except typer.Abort:
+            raise
+        except Exception:  # noqa: BLE001 - degrade to a line prompt
+            _disable_tui()
+    return Path(typer.prompt(label, default=default)).expanduser()
+
+
+def _ask_token(label: str) -> str:
+    if _tui_available():
+        try:
+            import questionary
+
+            token = questionary.password(label).ask()
+            if token is None:
+                raise typer.Abort()
+            return token.strip()
+        except typer.Abort:
+            raise
+        except Exception:  # noqa: BLE001 - degrade to a line prompt
+            _disable_tui()
+    return typer.prompt(label, hide_input=True).strip()
+
+
+def _confirm(label: str, *, default: bool = True) -> bool:
+    if _tui_available():
+        try:
+            import questionary
+
+            answer = questionary.confirm(label, default=default, auto_enter=False).ask()
+            return default if answer is None else bool(answer)
+        except Exception:  # noqa: BLE001 - degrade to a line prompt
+            _disable_tui()
+    return typer.confirm(label, default=default)
+
+
+_ALL = "__all__"
+_PASTE = "__paste__"
+
+
+def _select_scope_pages(candidates: list) -> list[str]:
+    """Pages to scope ingestion to; [] means "all pages shared with the integration"."""
+    if _tui_available():
+        try:
+            import questionary
+
+            choices = [
+                questionary.Choice(
+                    "All pages shared with the integration", value=_ALL, checked=True
+                )
+            ]
+            choices += [
+                questionary.Choice(p.title or "(untitled)", value=p.id) for p in candidates
+            ]
+            choices.append(questionary.Choice("Paste a page URL...", value=_PASTE))
+            picked = questionary.checkbox(
+                "Which pages should the wiki pull?  (space toggles, enter confirms)",
+                choices=choices,
+            ).ask()
+            if picked is None:
+                raise typer.Abort()
+            if _ALL in picked or not picked:
+                return []
+            ids = [v for v in picked if v not in (_ALL, _PASTE)]
+            if _PASTE in picked:
+                url = (questionary.text("Page URL").ask() or "").strip()
+                if url:
+                    ids.append(_extract_page_id_from_url(url))
+            return ids
+        except typer.Abort:
+            raise
+        except Exception:  # noqa: BLE001 - degrade to the numbered fallback
+            _disable_tui()
+
+    # Non-interactive fallback: numbered list, comma-separated, or "all".
     for i, page in enumerate(candidates, start=1):
         console.print(f"   [{i}] {page.title}")
     paste_index = len(candidates) + 1
-    console.print(f"   [{paste_index}] paste a page URL…")
-    choice = typer.prompt("   Choice", default="1" if candidates else str(paste_index))
-    try:
-        idx = int(choice.strip())
-    except ValueError:
-        idx = paste_index
-    if 1 <= idx <= len(candidates):
-        page = candidates[idx - 1]
-        return page.id, page.title
-    url = typer.prompt("   Page URL")
-    return _extract_page_id_from_url(url), url
+    console.print(f"   [{paste_index}] paste a page URL")
+    choice = typer.prompt("   Pages to pull (comma-separated numbers, or 'all')", default="all")
+    if choice.strip().lower() in ("all", ""):
+        return []
+    ids = []
+    for part in choice.split(","):
+        part = part.strip()
+        if not part.isdigit():
+            continue
+        idx = int(part)
+        if 1 <= idx <= len(candidates):
+            ids.append(candidates[idx - 1].id)
+        elif idx == paste_index:
+            ids.append(_extract_page_id_from_url(typer.prompt("   Page URL")))
+    return ids
+
+
+def _select_databases(raw_databases: list[dict]) -> list[DatabaseRef]:
+    if _tui_available():
+        try:
+            import questionary
+
+            choices = [questionary.Choice("All databases", value=_ALL, checked=True)]
+            choices += [
+                questionary.Choice(_database_title(db), value=db["id"]) for db in raw_databases
+            ]
+            picked = questionary.checkbox(
+                "Which databases should the wiki pull?  (space toggles, enter confirms)",
+                choices=choices,
+            ).ask()
+            if picked is None:
+                raise typer.Abort()
+            if _ALL in picked or not picked:
+                selected = raw_databases
+            else:
+                wanted = set(picked)
+                selected = [db for db in raw_databases if db["id"] in wanted]
+            return [DatabaseRef(id=db["id"], name=_database_title(db)) for db in selected]
+        except typer.Abort:
+            raise
+        except Exception:  # noqa: BLE001 - degrade to the [all/choose] fallback
+            _disable_tui()
+
+    # Non-interactive fallback: the original [all/choose] text flow.
+    console.print(f"   Found {len(raw_databases)} databases — pull all, or choose?")
+    choice = typer.prompt("   [all/choose]", default="all")
+    if choice.strip().lower().startswith("c"):
+        return _prompt_choose_databases(raw_databases)
+    return [DatabaseRef(id=db["id"], name=_database_title(db)) for db in raw_databases]
 
 
 def _prompt_choose_databases(raw_databases: list[dict]) -> list[DatabaseRef]:
@@ -196,47 +358,46 @@ def init() -> None:
     console.print("[bold]notionwiki setup[/bold]\n")
 
     existing = load_config() if config_exists() else None
-    default_root = str(existing.wiki_root) if existing else str(Path.home() / "notionwiki")
+    default_root = str(existing.wiki_root) if existing else str(Path.home() / ".notionwiki")
 
     console.print("1. Where should the wiki live?")
-    wiki_root = Path(typer.prompt("   Wiki root", default=default_root)).expanduser()
+    wiki_root = _ask_path("Wiki root", default_root)
 
     console.print("2. Paste your Notion internal integration token:")
-    token = typer.prompt("   Token", hide_input=True)
+    token = _ask_token("Token")
     client = NotionClient(token)
     try:
-        pages = [Page.from_api(raw) for raw in itertools.islice(client.search(), 10)]
+        pages = [Page.from_api(raw) for raw in itertools.islice(client.search(), 25)]
     except Exception as exc:  # noqa: BLE001 - surfaced directly to the operator
         console.print(f"[red]Could not validate token:[/red] {exc}")
         raise typer.Exit(1) from exc
-    console.print("   [green]token valid[/green]")
+    console.print(f"   [green]token valid[/green]  [dim]{_mask_secret(token)}[/dim]")
 
-    console.print("3. Which Notion page is the wiki root? (share it with the integration first)")
-    root_page_id, root_page_title = _prompt_root_page(pages[:5])
+    console.print("3. Which Notion pages should the wiki pull? (share them with the integration)")
+    console.print(
+        "   [dim]Keep 'All ...' selected to pull everything shared, or pick specific pages — "
+        "their sub-pages are always included.[/dim]"
+    )
+    root_page_ids = _select_scope_pages(pages[:15])
 
-    console.print("4. Also pull databases under it?")
+    console.print("4. Also pull databases?")
     databases: list[DatabaseRef] = []
-    if typer.confirm("  ", default=True):
+    if _confirm("Pull databases too?", default=True):
         raw_databases = list(itertools.islice(client.search_databases(), 25))
         if raw_databases:
-            console.print(f"   Found {len(raw_databases)} databases — pull all, or choose?")
-            choice = typer.prompt("   [all/choose]", default="all")
-            if choice.strip().lower().startswith("c"):
-                databases = _prompt_choose_databases(raw_databases)
-            else:
-                databases = [
-                    DatabaseRef(id=db["id"], name=_database_title(db)) for db in raw_databases
-                ]
+            databases = _select_databases(raw_databases)
+        else:
+            console.print("   [dim]No databases shared with the integration.[/dim]")
 
     console.print("5. Pull interval in minutes")
     interval_minutes = max(1, typer.prompt("   Interval", default=1, type=int))
 
     console.print("6. Install the background schedule now?")
-    install_schedule = typer.confirm("  ", default=True)
+    install_schedule = _confirm("Install the background schedule now?", default=True)
 
     config = Config(
         wiki_root=wiki_root,
-        root_page_id=root_page_id,
+        root_page_ids=root_page_ids,
         databases=databases,
         interval_minutes=interval_minutes,
     )
@@ -417,7 +578,11 @@ def pull(
             lock_path=lock_path(state_dir),
             state_dir=state_dir,
         )
-        stats = runner.run(full=full, databases=config.database_pairs())
+        stats = runner.run(
+            full=full,
+            databases=config.database_pairs(),
+            root_page_ids=config.root_page_ids,
+        )
     finally:
         db.close()
         client.close()

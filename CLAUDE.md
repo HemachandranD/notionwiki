@@ -52,10 +52,15 @@ uv run notionwiki --help              # run the CLI in place (alias: `uv run nw`
   file lock: `msvcrt`/`fcntl`), `archive.py` (timestamped copy-before-overwrite).
 - `ingest/` — `poller.py` (incremental search + full sweep), `writer.py` (content hashing,
   outcome decision incl. the settle window, frontmatter rendering), `daemon_log.py`
-  (`daemon_log.md` ledger, parse/format/rotate), `pull.py` (`PullRunner` orchestration).
+  (`daemon_log.md` ledger, parse/format/rotate), `scope.py` (`ScopeResolver` — ancestry-walk
+  filter that restricts ingestion to the operator-selected `root_page_ids` and their sub-pages;
+  empty selection = pull everything shared, unchanged behavior), `pull.py` (`PullRunner`
+  orchestration; applies the scope filter to the page stream).
 - `cli.py` — Typer app: `init` (interactive wizard), `pull`, `status`, `open`, `graph`, `lint`,
   `service install|uninstall|status`, `daemon`. Welcome banner suppressed on `--json`/`--quiet`/
-  non-TTY output (§8.2).
+  non-TTY output (§8.2). `init` uses `questionary` for real-TTY selection (masked-token feedback,
+  checkbox multi-select of pages/databases with an "All" option), probing prompt_toolkit once and
+  falling back to line prompts on unsupported terminals (Git Bash/mintty) and piped input.
 - `schedule/` — one `Scheduler` implementation per OS (`windows.py` schtasks, `macos.py` launchd,
   `linux.py` systemd user timer + headless Secret Service detection), dispatched by
   `detect_scheduler()`.
@@ -66,8 +71,13 @@ uv run notionwiki --help              # run the CLI in place (alias: `uv run nw`
 **Deviations from `docs/design.md` filled in during implementation** (see the plan file for full
 reasoning): Notion API pinned to version `2022-06-28`; `tomli-w` added for writing `config.toml`
 (§12 names `pyyaml`, which is actually for raw-file frontmatter, not config); `respx` added as a
-dev-only test dependency; database scope (§14.2) is resolved once at `init` time into an explicit
-`[[notion.databases]]` list rather than a live "all".
+dev-only test dependency; `questionary` added for the interactive `init` TUI; database scope
+(§14.2) is resolved once at `init` time into an explicit `[[notion.databases]]` list rather than a
+live "all"; **page scope** works the same way — `init` snapshots the chosen pages into
+`[notion].root_page_ids` (a list; empty = all), and `ScopeResolver` enforces it at pull time via
+parent-chain ancestry (the design-doc §5.1/§5.2 "page-tree walk from the root", implemented as an
+ancestry filter over Search results rather than a top-down traversal). The pre-multi-select
+singular `root_page_id` key is still read for back-compat.
 
 ## When Adding Code
 

@@ -30,7 +30,7 @@ def tick_once(config: Config, token: str, state_dir: Path) -> None:
             lock_path=lock_path(state_dir),
             state_dir=state_dir,
         )
-        runner.run(databases=config.database_pairs())
+        runner.run(databases=config.database_pairs(), root_page_ids=config.root_page_ids)
     finally:
         db.close()
         client.close()

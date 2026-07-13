@@ -29,7 +29,9 @@ class DatabaseRef:
 @dataclass
 class Config:
     wiki_root: Path
-    root_page_id: str = ""
+    root_page_ids: list[str] = field(default_factory=list)
+    """Pages (and their sub-pages) that ingestion is scoped to. Empty means
+    "no restriction" — pull everything shared with the integration (§5.1)."""
     databases: list[DatabaseRef] = field(default_factory=list)
     interval_minutes: int = 1
     full_sweep_every_n_runs: int = 60  # ~hourly at a 1-minute cadence (§5.1)
@@ -42,9 +44,13 @@ class Config:
         wiki = data.get("wiki", {})
         notion = data.get("notion", {})
         schedule = data.get("schedule", {})
+        # Back-compat: pre-multi-select configs stored a single `root_page_id`.
+        root_page_ids = list(notion.get("root_page_ids", []))
+        if not root_page_ids and notion.get("root_page_id"):
+            root_page_ids = [notion["root_page_id"]]
         return cls(
             wiki_root=Path(wiki["root"]).expanduser(),
-            root_page_id=notion.get("root_page_id", ""),
+            root_page_ids=root_page_ids,
             databases=[DatabaseRef(**db) for db in notion.get("databases", [])],
             interval_minutes=schedule.get("interval_minutes", 1),
             full_sweep_every_n_runs=schedule.get("full_sweep_every_n_runs", 60),
@@ -54,7 +60,7 @@ class Config:
         return {
             "wiki": {"root": str(self.wiki_root)},
             "notion": {
-                "root_page_id": self.root_page_id,
+                "root_page_ids": self.root_page_ids,
                 "databases": [{"id": db.id, "name": db.name} for db in self.databases],
             },
             "schedule": {

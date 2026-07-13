@@ -85,7 +85,7 @@ Because there is no write-back, there is **no watcher, no write queue, no confli
 
 ## 4. Local layout
 
-The bridge keeps two things: a small **state directory** (OS default location) and the **wiki root** (location chosen by the user in `notionwiki init`, §8.1 — may sit anywhere, e.g. `~/notionwiki` or inside a Dropbox/iCloud folder). `config.toml` records the chosen wiki path.
+The bridge keeps two things: a small **state directory** (OS default location) and the **wiki root** (location chosen by the user in `notionwiki init`, §8.1 — may sit anywhere, e.g. `~/.notionwiki` or inside a Dropbox/iCloud folder). `config.toml` records the chosen wiki path.
 
 ```
 <state dir>/                     ← ~/.notionwiki, $XDG_STATE_HOME, or %APPDATA%\notionwiki
@@ -156,6 +156,7 @@ A pull runs in one of **two modes** — a cheap incremental poll on every tick, 
 
 - Query the Notion **Search API**, sorted by `last_edited_time` **descending**, and **early-terminate** once results are older than the stored baseline minus an **overlap window** (a few minutes). The overlap window covers two realities: Notion Search is *eventually consistent* (results can lag edits), and `last_edited_time` has minute granularity — two edits in the same minute with a pull between them would otherwise leave the second edit invisible forever.
   > ⚠ **Search scope is a constraint, not an automatic guarantee.** The Search API returns everything shared with the integration, not just the wiki root — the two coincide only because §11 mandates sharing exactly the wiki root page and nothing else. If the user shares additional pages with the integration later, they silently enter scope. Worth stating plainly at share-time (in `init` and in `AGENTS.md`/`CLAUDE.md`): keep the integration shared with exactly the one root page.
+  > ✅ **Page-scope filter (implemented).** `init` now lets the operator multi-select which shared pages to pull; the choice is stored as `[notion].root_page_ids` (a list — empty means "everything shared", the original behavior). At pull time `ingest/scope.py`'s `ScopeResolver` keeps only pages that are, or descend from, a selected page — walking each page's `parent_id` chain (fetching+caching ancestors as needed). This is the concrete form of §5.2's "page-tree walk from the root", realized as an ancestry filter over Search results rather than a top-down crawl, and it means extra pages shared with the integration no longer silently enter scope unless they sit under a selected root. (Deletion reconciliation still diffs against the full shared set; narrowing scope leaves previously-pulled files until they're deleted in Notion — a known limitation.)
 - **Database rows are not discovered via Search** — rows can surface unreliably through the Search API, so they're always enumerated by direct database query (§5.2), never by search. Search covers regular pages/subpages only.
 - **Block fetching is gated on the timestamp:** only pages whose `last_edited_time` is newer than the stored `remote_edited_at` (or inside the overlap window) get their block tree fetched, converted, and hashed. The `content_hash` comparison then decides whether anything actually changed and a write happens. Unchanged-timestamp pages cost one search-result row, not a block-tree fetch — this is what keeps a ~60 s cadence inside the API budget.
 
@@ -279,7 +280,7 @@ $ notionwiki init
 notionwiki setup
 
 1. Where should the wiki live?
-   Wiki root  [~/notionwiki]:            ← the location prompt; validated, created if absent
+   Wiki root  [~/.notionwiki]:            ← the location prompt; validated, created if absent
 2. Paste your Notion internal integration token: ****   ← stored in the OS keychain (§11), not on disk
    ✓ token valid — connected as "Hema's workspace"
 3. Which Notion page is the wiki root? (share it with the integration first)
@@ -291,8 +292,8 @@ notionwiki setup
    ✓ Detected Windows — registered Task Scheduler task "notionwiki pull" (at log on, every 1 min)
 
 ✓ Wrote config to ~/.notionwiki/config.toml
-✓ Scaffolded wiki at ~/notionwiki (raw/notion/, wiki/, outputs/, CLAUDE.md/AGENTS.md)
-Run `notionwiki pull` for a first sync, or point your assistant at ~/notionwiki.
+✓ Scaffolded wiki at ~/.notionwiki (raw/notion/, wiki/, outputs/, CLAUDE.md/AGENTS.md)
+Run `notionwiki pull` for a first sync, or point your assistant at ~/.notionwiki.
 ```
 
 - **The wiki location prompt is step 1** and drives everything: the mirror, `state.db`, `archive/`, and the config all hang off it (or off an XDG/`%APPDATA%` state dir, with the *wiki* folder placed wherever the user chose).
@@ -320,7 +321,7 @@ The CLI is the whole product, so its first impression is a Claude-Code-style wel
 │  ✻ Welcome to notionwiki                            │
 │                                              │
 │    Notion → LLM Wiki bridge · v0.1.0         │
-│    Wiki    ~/notionwiki                     │
+│    Wiki    ~/.notionwiki                     │
 │    Status  42 sources · last pull 2m ago     │
 ╰──────────────────────────────────────────────╯
 
