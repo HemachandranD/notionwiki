@@ -347,7 +347,7 @@ This is a **wiki-layer** concern, fully decoupled from Notion ingestion (§3). `
 
 1. Scans the agent-built `wiki/**/*.md` (excluding the generated `index.md`/`graph.json` themselves), parsing `[[links]]` and frontmatter (`type`, `description`).
 2. Regenerates `wiki/index.md` (catalog) and `wiki/graph.json` (nodes/edges/backlink counts).
-3. Serves `http://localhost:7777/graph` — FastAPI + a vendored force-directed library (no CDN, works offline), a *read-only* view sized by backlink count and colored by section/tag. Bound to `127.0.0.1` only.
+3. Serves `http://localhost:7777/graph` — FastAPI + the vendored `force-graph` library (canvas + d3-force, no CDN, works offline), a *read-only* view sized by backlink count and colored by type. Pan/zoom/drag; **clicking a node** opens a drawer with that wiki page rendered to HTML (server-side `markdown`) plus "Open in Notion" links resolved from the page's `sources:` frontmatter. `/` redirects to `/graph`, and `/graph#node=<id>` is a shareable deep link. Bound to `127.0.0.1` only.
 
 It has **no dependency on Notion, `state.db`, or the ingestion daemon** — it works purely off the local wiki files, so it functions identically for non-Notion sources. It can run on demand, or as a long-lived server that regenerates on a timer or when the wiki files change. Optional and can ship after the ingestion path is solid.
 

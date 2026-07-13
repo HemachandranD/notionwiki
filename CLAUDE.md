@@ -71,17 +71,22 @@ uv run notionwiki --help              # run the CLI in place (alias: `uv run nw`
 - `graph/` — `scanner.py`/`index_gen.py`/`graph_gen.py`/`lint.py` (pure wiki-layer tooling, no
   Notion dependency) + `server.py` (FastAPI, `127.0.0.1:7777` only). The UI is the vendored
   `graph/static/force-graph.min.js` (vasturiano's canvas force-graph, self-contained so it works
-  offline) — pan/zoom/drag, nodes colored by type and sized by backlinks, hover panel. Routes:
-  `/graph` (HTML), `/graph.json` (data), `/force-graph.min.js` (the bundle), and `/` → `/graph`
-  redirect. The `.js` asset must stay in both the hatch wheel (automatic — it's inside the package)
-  and the npm `files` glob (`src/notion_wiki/graph/static/*.js`, added explicitly since `src/**/*.py`
-  would exclude it).
+  offline) — pan/zoom/drag, nodes colored by type and sized by backlinks, hover panel. Clicking a
+  node opens a slide-in drawer with the wiki page rendered to HTML (server-side `markdown`, in the
+  `[graph]` extra) plus "Open in Notion" links resolved by following the page's
+  `sources: [[raw/notion/<slug>]]` frontmatter to each raw file's `notion_url`. Routes: `/graph`
+  (HTML), `/graph.json` (data), `/page?id=<node>` (rendered page + resolved sources, with a
+  path-traversal guard), `/force-graph.min.js` (the bundle), and `/` → `/graph` redirect. The page
+  also honors a `/graph#node=<id>` deep link. The `.js` asset must stay in both the hatch wheel
+  (automatic — it's inside the package) and the npm `files` glob
+  (`src/notion_wiki/graph/static/*.js`, added explicitly since `src/**/*.py` would exclude it).
 - `daemon.py` — optional long-lived loop (APScheduler), lazy-imported behind the `[daemon]` extra.
 
 **Deviations from `docs/design.md` filled in during implementation** (see the plan file for full
 reasoning): Notion API pinned to version `2022-06-28`; `tomli-w` added for writing `config.toml`
 (§12 names `pyyaml`, which is actually for raw-file frontmatter, not config); `respx` added as a
-dev-only test dependency; `questionary` added for the interactive `init` TUI; database scope
+dev-only test dependency; `questionary` added for the interactive `init` TUI; `markdown` added to
+the `[graph]` extra to render wiki pages in the graph UI's click-to-open drawer; database scope
 (§14.2) is resolved once at `init` time into an explicit `[[notion.databases]]` list rather than a
 live "all"; **page scope** works the same way — `init` snapshots the chosen pages into
 `[notion].root_page_ids` (a list; empty = all), and `ScopeResolver` enforces it at pull time via

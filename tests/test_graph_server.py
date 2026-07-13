@@ -47,3 +47,34 @@ def test_vendored_force_graph_js_is_served(tmp_path: Path):
     assert response.status_code == 200
     assert "javascript" in response.headers["content-type"]
     assert "force-graph" in response.text  # the bundle's banner comment
+
+
+def test_page_endpoint_renders_markdown_and_resolves_notion_sources(tmp_path: Path):
+    # A raw feeder page carrying the Notion URL...
+    write_page(
+        tmp_path,
+        "raw/notion/foo.md",
+        frontmatter={"notion_url": "https://notion.so/foo", "title": "Foo Source"},
+        body="raw body",
+    )
+    # ...and a wiki page that cites it and has real markdown.
+    write_page(
+        tmp_path,
+        "wiki/concepts/thing.md",
+        frontmatter={"type": "concept", "sources": ["[[raw/notion/foo]]"]},
+        body="# Thing\n\nSome **bold** text.",
+    )
+
+    client = TestClient(create_app(tmp_path))
+    response = client.get("/page", params={"id": "wiki/concepts/thing"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "<strong>bold</strong>" in data["html"]
+    assert data["sources"] == [{"title": "Foo Source", "url": "https://notion.so/foo"}]
+
+
+def test_page_endpoint_rejects_path_traversal(tmp_path: Path):
+    client = TestClient(create_app(tmp_path))
+    assert client.get("/page", params={"id": "../../etc/passwd"}).status_code == 404
+    assert client.get("/page", params={"id": "wiki/concepts/missing"}).status_code == 404

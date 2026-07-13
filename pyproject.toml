@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-graph = ["fastapi>=0.110", "uvicorn>=0.29"]
+graph = ["fastapi>=0.110", "uvicorn>=0.29", "markdown>=3.5"]
 daemon = ["apscheduler>=3.10"]
 
 [project.scripts]
