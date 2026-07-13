@@ -1,0 +1,32 @@
+{
+  "name": "notionwiki",
+  "version": "0.1.0",
+  "description": "One-way ingestion bridge: pulls a Notion workspace into the raw layer of an LLM Wiki. npm wrapper over the Python CLI.",
+  "keywords": ["notion", "wiki", "llm", "ingestion", "markdown", "cli"],
+  "license": "MIT",
+  "homepage": "https://github.com/HemachandranD/notionwiki#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HemachandranD/notionwiki.git"
+  },
+  "bin": {
+    "notionwiki": "bin/notionwiki.js",
+    "nw": "bin/notionwiki.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "src/**/*.py",
+    "pyproject.toml",
+    "uv.lock",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "os": ["darwin", "linux", "win32"]
+}

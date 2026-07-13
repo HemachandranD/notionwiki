@@ -1,6 +1,6 @@
 """Linux systemd user timer integration (docs/design.md §10, §11).
 
-A `notion-wiki.timer` -> `notion-wiki.service` (Type=oneshot) pair under the
+A `notionwiki.timer` -> `notionwiki.service` (Type=oneshot) pair under the
 user's systemd instance. A headless box running this timer commonly lacks a
 Secret Service (`keyring`'s default backend needs a logged-in desktop
 session's keyring daemon) — detected at install time so the user is steered
@@ -15,7 +15,7 @@ from pathlib import Path
 
 from notion_wiki.schedule.base import ScheduleStatus, pull_argv
 
-UNIT_NAME = "notion-wiki"
+UNIT_NAME = "notionwiki"
 
 
 def _systemd_user_dir() -> Path:
@@ -45,12 +45,12 @@ class LinuxScheduler:
         exec_start = " ".join(pull_argv())
 
         (unit_dir / f"{UNIT_NAME}.service").write_text(
-            "[Unit]\nDescription=notion-wiki pull\n\n"
+            "[Unit]\nDescription=notionwiki pull\n\n"
             f"[Service]\nType=oneshot\nExecStart={exec_start}\n",
             encoding="utf-8",
         )
         (unit_dir / f"{UNIT_NAME}.timer").write_text(
-            "[Unit]\nDescription=notion-wiki pull timer\n\n"
+            "[Unit]\nDescription=notionwiki pull timer\n\n"
             f"[Timer]\nOnBootSec={interval_minutes}min\nOnUnitActiveSec={interval_minutes}min\n\n"
             "[Install]\nWantedBy=timers.target\n",
             encoding="utf-8",

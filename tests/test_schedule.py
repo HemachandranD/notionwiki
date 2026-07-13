@@ -68,7 +68,7 @@ def test_macos_install_writes_plist_with_start_interval(tmp_path: Path, monkeypa
     warnings = MacScheduler().install(interval_minutes=3)
 
     assert warnings == []
-    plist_path = tmp_path / "com.notion-wiki.pull.plist"
+    plist_path = tmp_path / "com.notionwiki.pull.plist"
     assert plist_path.exists()
     import plistlib
 
@@ -86,8 +86,8 @@ def test_linux_install_writes_timer_and_service(tmp_path: Path, monkeypatch):
     warnings = LinuxScheduler().install(interval_minutes=1)
 
     assert warnings == []
-    assert (tmp_path / "notion-wiki.service").exists()
-    timer_content = (tmp_path / "notion-wiki.timer").read_text(encoding="utf-8")
+    assert (tmp_path / "notionwiki.service").exists()
+    timer_content = (tmp_path / "notionwiki.timer").read_text(encoding="utf-8")
     assert "OnUnitActiveSec=1min" in timer_content
 
 

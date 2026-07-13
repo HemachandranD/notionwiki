@@ -17,7 +17,7 @@ _GRAPH_HTML = """<!doctype html>
 <html>
 <head>
 <meta charset="utf-8" />
-<title>notion-wiki graph</title>
+<title>notionwiki graph</title>
 <style>
   body { margin: 0; background: #0b0d12; color: #e6e6e6; font-family: system-ui, sans-serif; }
   svg { width: 100vw; height: 100vh; display: block; }
@@ -98,7 +98,7 @@ main();
 
 
 def create_app(wiki_root: Path) -> FastAPI:
-    fastapi_app = FastAPI(title="notion-wiki graph")
+    fastapi_app = FastAPI(title="notionwiki graph")
 
     @fastapi_app.get("/graph", response_class=HTMLResponse)
     def graph_page() -> str:

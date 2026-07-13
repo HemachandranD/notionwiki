@@ -12,7 +12,7 @@ import subprocess
 
 from notion_wiki.schedule.base import ScheduleStatus, pull_argv
 
-TASK_NAME = "notion-wiki pull"
+TASK_NAME = "notionwiki pull"
 
 
 def _schtasks() -> str:

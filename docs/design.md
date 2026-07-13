@@ -1,7 +1,7 @@
-# notion-wiki — Design Document
+# notionwiki — Design Document
 
 **Status:** Draft v2 (one-way redesign) · 2026-07-09
-**Goal:** A **one-way ingestion bridge** that pulls a Notion workspace into the immutable Raw Sources layer of an LLM Wiki. Notion is where you author and update content from anywhere; a scheduled `notion-wiki pull` periodically pulls it, converts it to markdown, and files it as raw source material. An assistant then builds and maintains the wiki layer on top — the "LLM Wiki" pattern (`../llm_wiki.md`), with Notion as the feeder for the raw layer.
+**Goal:** A **one-way ingestion bridge** that pulls a Notion workspace into the immutable Raw Sources layer of an LLM Wiki. Notion is where you author and update content from anywhere; a scheduled `notionwiki pull` periodically pulls it, converts it to markdown, and files it as raw source material. An assistant then builds and maintains the wiki layer on top — the "LLM Wiki" pattern (`../llm_wiki.md`), with Notion as the feeder for the raw layer.
 
 > **v1 → v2 change.** The earlier design was a *bidirectional* mirror where Notion **was** the wiki (two-way sync, conflict resolution, block-level push, last-write-wins + backup). This redesign makes the bridge **pull-only**: Notion → markdown, one direction. That removes the entire write-back path — no push, no conflict resolution, no block-level patching, no `conflicts/`. The daemon becomes a simple *poll → convert → write → log* loop.
 
@@ -39,7 +39,7 @@ The key reframe: **Notion is not the wiki — Notion feeds the wiki's raw-source
 flowchart LR
     NOTION[(Notion API)]
 
-    subgraph Ingest["notion-wiki pull — ingestion (scheduled, ~1 min)"]
+    subgraph Ingest["notionwiki pull — ingestion (scheduled, ~1 min)"]
         POLL[Poll changed pages]
         CONV[Converter<br/>blocks → markdown]
         WRITE[Writer<br/>overwrite + archive]
@@ -53,7 +53,7 @@ flowchart LR
         IDX[wiki/index.md · wiki/graph.json]
     end
 
-    subgraph WikiTooling["notion-wiki graph — wiki layer (on demand)"]
+    subgraph WikiTooling["notionwiki graph — wiki layer (on demand)"]
         GEN[Index / graph generator<br/>scans wiki/*.md]
         API[Graph UI<br/>localhost:7777]
     end
@@ -76,8 +76,8 @@ flowchart LR
 
 **Two independent concerns, deliberately separated:**
 
-1. **Ingestion** (`notion-wiki pull`) owns exactly one direction — Notion → `raw/notion/` — and nothing else. It is a **stateless, one-shot command**: run it and it does one full pull/convert/write cycle and exits. It never reads agent edits, never touches the wiki pages, and knows nothing about the graph. Its only persistent state is `state.db` (ingestion bookkeeping: `notion_id`, hashes, pull timestamps) and the `daemon_log.md` ledger. It runs on a schedule (§10) — no long-lived process required.
-2. **The wiki tooling** (`notion-wiki graph`, §9) is a **wiki-layer** concern: it scans the agent-built `wiki/*.md`, generates `wiki/index.md`/`wiki/graph.json`, and serves the force-directed graph at localhost:7777. It has no dependency on Notion — you could feed `raw/` from other feeders only and the wiki tooling would work unchanged.
+1. **Ingestion** (`notionwiki pull`) owns exactly one direction — Notion → `raw/notion/` — and nothing else. It is a **stateless, one-shot command**: run it and it does one full pull/convert/write cycle and exits. It never reads agent edits, never touches the wiki pages, and knows nothing about the graph. Its only persistent state is `state.db` (ingestion bookkeeping: `notion_id`, hashes, pull timestamps) and the `daemon_log.md` ledger. It runs on a schedule (§10) — no long-lived process required.
+2. **The wiki tooling** (`notionwiki graph`, §9) is a **wiki-layer** concern: it scans the agent-built `wiki/*.md`, generates `wiki/index.md`/`wiki/graph.json`, and serves the force-directed graph at localhost:7777. It has no dependency on Notion — you could feed `raw/` from other feeders only and the wiki tooling would work unchanged.
 
 Assistants read `raw/` (by convention, never write it) and build/maintain the wiki layer beside it with their native file tools. Conventions load automatically via `AGENTS.md`/`CLAUDE.md` at the wiki root.
 
@@ -85,10 +85,10 @@ Because there is no write-back, there is **no watcher, no write queue, no confli
 
 ## 4. Local layout
 
-The bridge keeps two things: a small **state directory** (OS default location) and the **wiki root** (location chosen by the user in `notion-wiki init`, §8.1 — may sit anywhere, e.g. `~/notion-wiki` or inside a Dropbox/iCloud folder). `config.toml` records the chosen wiki path.
+The bridge keeps two things: a small **state directory** (OS default location) and the **wiki root** (location chosen by the user in `notionwiki init`, §8.1 — may sit anywhere, e.g. `~/notionwiki` or inside a Dropbox/iCloud folder). `config.toml` records the chosen wiki path.
 
 ```
-<state dir>/                     ← ~/.notion-wiki, $XDG_STATE_HOME, or %APPDATA%\notion-wiki
+<state dir>/                     ← ~/.notionwiki, $XDG_STATE_HOME, or %APPDATA%\notionwiki
 ├── config.toml                  ← records wiki_root path, interval, database scope
 ├── state.db                     ← SQLite ingestion state
 └── archive/                     ← replaced/removed raw versions, timestamped (§5.3)
@@ -104,8 +104,8 @@ The bridge keeps two things: a small **state directory** (OS default location) a
 │   ├── papers/
 │   └── ...
 ├── wiki/                        ← LAYER 2 — LLM-generated markdown (agent-owned)
-│   ├── index.md                 ← master catalog (generated by notion-wiki graph, §9)
-│   ├── graph.json               ← generated link graph (notion-wiki graph, §9)
+│   ├── index.md                 ← master catalog (generated by notionwiki graph, §9)
+│   ├── graph.json               ← generated link graph (notionwiki graph, §9)
 │   ├── log.md                   ← operation log (agent-owned narrative)
 │   ├── overview.md              ← high-level synthesis
 │   ├── concepts/                ← concept pages
@@ -159,7 +159,7 @@ A pull runs in one of **two modes** — a cheap incremental poll on every tick, 
 - **Database rows are not discovered via Search** — rows can surface unreliably through the Search API, so they're always enumerated by direct database query (§5.2), never by search. Search covers regular pages/subpages only.
 - **Block fetching is gated on the timestamp:** only pages whose `last_edited_time` is newer than the stored `remote_edited_at` (or inside the overlap window) get their block tree fetched, converted, and hashed. The `content_hash` comparison then decides whether anything actually changed and a write happens. Unchanged-timestamp pages cost one search-result row, not a block-tree fetch — this is what keeps a ~60 s cadence inside the API budget.
 
-**Full reconciliation sweep** (every Nth run — default hourly — or on demand via `notion-wiki pull --full`):
+**Full reconciliation sweep** (every Nth run — default hourly — or on demand via `notionwiki pull --full`):
 
 - Enumerate **all** in-scope pages (page-tree traversal from the wiki root + direct database queries for rows, §5.2) and diff the complete `notion_id` set against `state.db`. Pages present locally but absent remotely are the **deletions** → archived per §5.3. The sweep also self-heals anything an incremental poll missed (search-index lag beyond the overlap window, a page moved into scope).
 
@@ -167,7 +167,7 @@ A pull runs in one of **two modes** — a cheap incremental poll on every tick, 
 
 - Runs on a **~60 s schedule** (§10); any run can also be invoked by hand. Each run reads its baseline from `state.db`, so cadence is a scheduling choice, not a code concern.
 - Respect Notion's ~3 req/s average rate limit with a token-bucket limiter within a run and exponential backoff on 429. (An incremental pull is far under the budget; the full sweep is the expensive one, which is why it runs hourly, not every tick.)
-- **Single-instance lock.** A manual `notion-wiki pull` can overlap a scheduled tick, and a slow run (large workspace, 429 backoff) can easily exceed the 60 s cadence and overlap the *next* scheduled tick even without manual invocation. Two writers to `state.db` and the same `raw/*.md` files is a corruption path, so every run takes a single-instance lock first (a lock file beside `state.db`, or a SQLite `BEGIN EXCLUSIVE` transaction). A run that can't acquire it exits immediately and logs a `skipped | already running` ledger line (§6) rather than proceeding. This ships in **0.1** — it shapes `state.db`'s schema and the pull loop's skeleton from the start, not a 0.4 hardening add-on.
+- **Single-instance lock.** A manual `notionwiki pull` can overlap a scheduled tick, and a slow run (large workspace, 429 backoff) can easily exceed the 60 s cadence and overlap the *next* scheduled tick even without manual invocation. Two writers to `state.db` and the same `raw/*.md` files is a corruption path, so every run takes a single-instance lock first (a lock file beside `state.db`, or a SQLite `BEGIN EXCLUSIVE` transaction). A run that can't acquire it exits immediately and logs a `skipped | already running` ledger line (§6) rather than proceeding. This ships in **0.1** — it shapes `state.db`'s schema and the pull loop's skeleton from the start, not a 0.4 hardening add-on.
 
 > ⚠ **Known constraint:** Notion's `last_edited_time` has **minute granularity**. The engine never trusts timestamps alone for "did it change" — timestamps only *gate the fetch* (with the overlap window as safety margin); `content_hash` decides. Timestamps only order confirmed changes.
 
@@ -222,18 +222,18 @@ Distinct from the wiki's `wiki/log.md` (a human-narrative timeline the agent mai
 - **Columns are `|`-delimited, not fixed-width** — they are shown padded above for readability, but a parser must split on `|` and trim, not assume column positions; long titles will drift alignment.
 - **Title escaping:** a Notion page title can legally contain `|`. On write, literal `|` characters in `title`/`detail` fields are replaced with `/` (or percent-escaped as `%7C`) so the column count per line is never ambiguous to a naive `split("|")` parser.
 - Actions: `pull` (outcome `new|updated|archived|unchanged|renamed`), `error` (outcome names the failing stage: `fetch|convert|write`), and `run` (outcome `skipped | already running` — emitted when the single-instance lock (§5.1) rejects a concurrent invocation; `notion_id`/`title` are `-` since no page-level work happened).
-- Greppable: `grep "^## \[" daemon_log.md | tail -20` for recent activity; `grep "| error " daemon_log.md` for failures — the same data `notion-wiki status` reads.
-- **Rotation.** At up to 1,440 runs/day the ledger grows unboundedly and would eventually slow `notion-wiki status` (which parses it) and inflate `raw/notion/`. The file rotates on a size cap (default a few MB) — the current file rolls to `daemon_log.<YYYY-MM>.md` and a fresh `daemon_log.md` starts; `status` reads the current file plus, if needed, the most recent rollover.
+- Greppable: `grep "^## \[" daemon_log.md | tail -20` for recent activity; `grep "| error " daemon_log.md` for failures — the same data `notionwiki status` reads.
+- **Rotation.** At up to 1,440 runs/day the ledger grows unboundedly and would eventually slow `notionwiki status` (which parses it) and inflate `raw/notion/`. The file rotates on a size cap (default a few MB) — the current file rolls to `daemon_log.<YYYY-MM>.md` and a fresh `daemon_log.md` starts; `status` reads the current file plus, if needed, the most recent rollover.
 
-**Suggested improvement over a plain `log.md`:** because errors are first-class rows (not buried in prose), `notion-wiki status` can surface "3 pages failed to convert since last clean run" deterministically, and a failed pull never blocks the rest of the batch.
+**Suggested improvement over a plain `log.md`:** because errors are first-class rows (not buried in prose), `notionwiki status` can surface "3 pages failed to convert since last clean run" deterministically, and a failed pull never blocks the rest of the batch.
 
 ## 7. Knowledge conventions (the LLM Wiki layer)
 
 The bridge feeds the raw layer; an assistant builds the wiki. Conventions come from the LLM Wiki pattern (`../llm_wiki.md`), unchanged in spirit — **deterministic bookkeeping to scripts, judgment to the LLM.**
 
-- **`CLAUDE.md` / `AGENTS.md`** (Layer 3, wiki root) — **the schema configuration itself**: page types (`concept`, `entity`, `source-summary`, `comparison`) mapped to the `wiki/` subfolders (`concepts/`, `entities/`, `sources/`), new-page-vs-edit-in-place rules, the compression rule (a wiki page larger than its source has negative value), the layout (`raw/` per-feeder, `wiki/`, `outputs/`), **the rule that all of `raw/` is read-only**, and the `notion-wiki` CLI. **The agent maintains these files** — a classic LLM-Wiki act; the two are identical twins (Codex/Cursor auto-load `AGENTS.md`; Claude Code auto-loads `CLAUDE.md`), so an edit to one re-renders the other in the same operation (a lint check flags drift). `notion-wiki init` seeds them (§8.1); after that the bridge never touches them — ingestion writes only `raw/notion/` (content + `daemon_log.md`) and `state.db` (§3).
-- **`wiki/index.md`** — the master catalog of the *wiki* pages (grouped by `type`, one `description` line each), regenerated by `notion-wiki graph` (§9) by scanning `wiki/` — **not** by the ingestion daemon. The agent's first read on any query: index → drill into ~10 pages → answer. Keeps retrieval cheap without embeddings at moderate scale (grep covers keyword search).
-- **`wiki/graph.json`** — the wiki link graph as plain nodes/edges/backlink-counts, generated by the same `notion-wiki graph` pass, for topology reasoning and the graph UI.
+- **`CLAUDE.md` / `AGENTS.md`** (Layer 3, wiki root) — **the schema configuration itself**: page types (`concept`, `entity`, `source-summary`, `comparison`) mapped to the `wiki/` subfolders (`concepts/`, `entities/`, `sources/`), new-page-vs-edit-in-place rules, the compression rule (a wiki page larger than its source has negative value), the layout (`raw/` per-feeder, `wiki/`, `outputs/`), **the rule that all of `raw/` is read-only**, and the `notionwiki` CLI. **The agent maintains these files** — a classic LLM-Wiki act; the two are identical twins (Codex/Cursor auto-load `AGENTS.md`; Claude Code auto-loads `CLAUDE.md`), so an edit to one re-renders the other in the same operation (a lint check flags drift). `notionwiki init` seeds them (§8.1); after that the bridge never touches them — ingestion writes only `raw/notion/` (content + `daemon_log.md`) and `state.db` (§3).
+- **`wiki/index.md`** — the master catalog of the *wiki* pages (grouped by `type`, one `description` line each), regenerated by `notionwiki graph` (§9) by scanning `wiki/` — **not** by the ingestion daemon. The agent's first read on any query: index → drill into ~10 pages → answer. Keeps retrieval cheap without embeddings at moderate scale (grep covers keyword search).
+- **`wiki/graph.json`** — the wiki link graph as plain nodes/edges/backlink-counts, generated by the same `notionwiki graph` pass, for topology reasoning and the graph UI.
 
 Both are **wiki-layer** artifacts derived from the agent's pages; the Notion ingestion daemon never generates or reads them.
 - **`wiki/log.md`** — the agent's narrative wiki timeline (ingest/query/lint), separate from `daemon_log.md`.
@@ -241,7 +241,7 @@ Both are **wiki-layer** artifacts derived from the agent's pages; the Notion ing
 
 **Immutability of `raw/` is by convention:** `CLAUDE.md`/`AGENTS.md` state plainly that agents read `raw/` and cite it via `sources:` frontmatter but never edit it. Not enforced by the daemon (accepted for v1).
 
-**Lint (agent-run).** Since the bridge no longer generates a sync-drift report, wiki health is the agent's `notion-wiki lint`-style pass over the *wiki* layer: orphan pages, dangling `[[links]]`, pages missing `description`/`type`, compression violations, and `AGENTS.md`/`CLAUDE.md` drifted from each other (§7). Detection can be scripted; fixing is judgment.
+**Lint (agent-run).** Since the bridge no longer generates a sync-drift report, wiki health is the agent's `notionwiki lint`-style pass over the *wiki* layer: orphan pages, dangling `[[links]]`, pages missing `description`/`type`, compression violations, and `AGENTS.md`/`CLAUDE.md` drifted from each other (§7). Detection can be scripted; fixing is judgment.
 
 ## 8. Agent interface: files + CLI
 
@@ -261,25 +261,25 @@ No agent-facing server. The contract is the wiki directory plus a small CLI.
 
 | Command | Purpose |
 |---|---|
-| `notion-wiki init` | **Interactive setup wizard** (§8.1) — asks for the wiki location and everything else, scaffolds the layout (`raw/notion/`, `wiki/`, `outputs/`), seeds `CLAUDE.md`/`AGENTS.md`, stores the token, optionally installs the schedule |
-| `notion-wiki pull` | Force an immediate pull/convert/write cycle (the schedule handles it otherwise) — *ingestion* |
-| `notion-wiki status` | Ingestion health, last pull time, recent errors (reads `daemon_log.md`) — *ingestion* |
-| `notion-wiki graph` | Regenerate `wiki/index.md`/`wiki/graph.json` from the wiki pages and serve the graph UI at localhost:7777 — *wiki layer* (§9) |
-| `notion-wiki service install` | Register scheduled `notion-wiki pull` with the OS scheduler (§10) — one command, OS detected automatically |
-| `notion-wiki open <page>` | Print the Notion URL / local path for a source — `<page>` is matched as a **filename/slug** first (exact, then substring), falling back to a case-insensitive **title substring** match against frontmatter if no filename matches; ambiguous matches list candidates instead of guessing |
+| `notionwiki init` | **Interactive setup wizard** (§8.1) — asks for the wiki location and everything else, scaffolds the layout (`raw/notion/`, `wiki/`, `outputs/`), seeds `CLAUDE.md`/`AGENTS.md`, stores the token, optionally installs the schedule |
+| `notionwiki pull` | Force an immediate pull/convert/write cycle (the schedule handles it otherwise) — *ingestion* |
+| `notionwiki status` | Ingestion health, last pull time, recent errors (reads `daemon_log.md`) — *ingestion* |
+| `notionwiki graph` | Regenerate `wiki/index.md`/`wiki/graph.json` from the wiki pages and serve the graph UI at localhost:7777 — *wiki layer* (§9) |
+| `notionwiki service install` | Register scheduled `notionwiki pull` with the OS scheduler (§10) — one command, OS detected automatically |
+| `notionwiki open <page>` | Print the Notion URL / local path for a source — `<page>` is matched as a **filename/slug** first (exact, then substring), falling back to a case-insensitive **title substring** match against frontmatter if no filename matches; ambiguous matches list candidates instead of guessing |
 
-Two intentional omissions: **no `notion-wiki sync`/`push`** (the bridge never writes to Notion), and the graph/index generation lives under `notion-wiki graph`, **not** the ingestion loop (§3).
+Two intentional omissions: **no `notionwiki sync`/`push`** (the bridge never writes to Notion), and the graph/index generation lives under `notionwiki graph`, **not** the ingestion loop (§3).
 
-### 8.1 Onboarding: interactive `notion-wiki init`
+### 8.1 Onboarding: interactive `notionwiki init`
 
 The entire product is a **single cross-platform CLI** — the only thing a user installs, on Windows, macOS, or Linux alike. First run is an interactive wizard so nobody has to hand-write config; every prompt has a sensible default (shown in brackets) and `--yes`/flags allow a fully non-interactive run for scripting.
 
 ```
-$ notion-wiki init
-notion-wiki setup
+$ notionwiki init
+notionwiki setup
 
 1. Where should the wiki live?
-   Wiki root  [~/notion-wiki]:            ← the location prompt; validated, created if absent
+   Wiki root  [~/notionwiki]:            ← the location prompt; validated, created if absent
 2. Paste your Notion internal integration token: ****   ← stored in the OS keychain (§11), not on disk
    ✓ token valid — connected as "Hema's workspace"
 3. Which Notion page is the wiki root? (share it with the integration first)
@@ -288,17 +288,17 @@ notion-wiki setup
    Found 3 databases — pull all, or choose? [all/choose]: all
 5. Pull interval in minutes [1]: 1
 6. Install the background schedule now? [Y/n]: y
-   ✓ Detected Windows — registered Task Scheduler task "notion-wiki pull" (at log on, every 1 min)
+   ✓ Detected Windows — registered Task Scheduler task "notionwiki pull" (at log on, every 1 min)
 
-✓ Wrote config to ~/.notion-wiki/config.toml
-✓ Scaffolded wiki at ~/notion-wiki (raw/notion/, wiki/, outputs/, CLAUDE.md/AGENTS.md)
-Run `notion-wiki pull` for a first sync, or point your assistant at ~/notion-wiki.
+✓ Wrote config to ~/.notionwiki/config.toml
+✓ Scaffolded wiki at ~/notionwiki (raw/notion/, wiki/, outputs/, CLAUDE.md/AGENTS.md)
+Run `notionwiki pull` for a first sync, or point your assistant at ~/notionwiki.
 ```
 
 - **The wiki location prompt is step 1** and drives everything: the mirror, `state.db`, `archive/`, and the config all hang off it (or off an XDG/`%APPDATA%` state dir, with the *wiki* folder placed wherever the user chose).
 - The wizard is OS-agnostic in every step except the final schedule install, where it detects the platform and calls the right mechanism (§10) — the user never picks Task Scheduler vs. launchd vs. systemd themselves.
-- **The interval prompt is in minutes, not seconds.** Task Scheduler's repetition floor is one minute (§10); prompting in seconds and then silently rounding a user's "30" up to 60 would quietly disobey the input. Minutes with a floor of 1 keeps the prompt truthful; `notion-wiki daemon` (§10) is the escape hatch for sub-minute cadence.
-- Re-running `notion-wiki init` is safe: it detects existing config and offers to reconfigure individual answers rather than clobbering.
+- **The interval prompt is in minutes, not seconds.** Task Scheduler's repetition floor is one minute (§10); prompting in seconds and then silently rounding a user's "30" up to 60 would quietly disobey the input. Minutes with a floor of 1 keeps the prompt truthful; `notionwiki daemon` (§10) is the escape hatch for sub-minute cadence.
+- Re-running `notionwiki init` is safe: it detects existing config and offers to reconfigure individual answers rather than clobbering.
 
 ### 8.2 CLI UX & branding
 
@@ -308,25 +308,25 @@ The CLI is the whole product, so its first impression is a Claude-Code-style wel
 
 | Facet | Value | Notes |
 |---|---|---|
-| Command | `notion-wiki` (alias `nw`) | canonical command; `nw` is a short alias for day-to-day use (`nw pull`, `nw status`) |
-| PyPI package | `notion-wiki` | globally unique; described as a tool *for* Notion, not named *as* Notion (trademark) |
+| Command | `notionwiki` (alias `nw`) | canonical command; `nw` is a short alias for day-to-day use (`nw pull`, `nw status`) |
+| PyPI package | `notionwiki` | globally unique; described as a tool *for* Notion, not named *as* Notion (trademark) |
 | Python module | `notion_wiki` | importable package name (`src/notion_wiki/`, `python -m notion_wiki`) |
-| Display name | **notion-wiki** (stylized) | shown in the banner; configurable brand string in one place — swap freely without touching the command or package |
+| Display name | **notionwiki** (stylized) | shown in the banner; configurable brand string in one place — swap freely without touching the command or package |
 
-**Welcome panel** — printed on bare `notion-wiki` (no args), `notion-wiki init`, and `notion-wiki --help`:
+**Welcome panel** — printed on bare `notionwiki` (no args), `notionwiki init`, and `notionwiki --help`:
 
 ```
 ╭──────────────────────────────────────────────╮
-│  ✻ Welcome to notion-wiki                            │
+│  ✻ Welcome to notionwiki                            │
 │                                              │
 │    Notion → LLM Wiki bridge · v0.1.0         │
-│    Wiki    ~/notion-wiki                     │
+│    Wiki    ~/notionwiki                     │
 │    Status  42 sources · last pull 2m ago     │
 ╰──────────────────────────────────────────────╯
 
- Try: notion-wiki pull        sync from Notion now
-      notion-wiki graph       open the wiki map at localhost:7777
-      notion-wiki status      ingestion health
+ Try: notionwiki pull        sync from Notion now
+      notionwiki graph       open the wiki map at localhost:7777
+      notionwiki status      ingestion health
 ```
 
 - The panel reads live state (wiki path, source count, last-pull age from `state.db`/`daemon_log.md`) so launch doubles as an at-a-glance dashboard — like Claude Code showing the cwd and context.
@@ -334,14 +334,14 @@ The CLI is the whole product, so its first impression is a Claude-Code-style wel
 
 **Banner suppression rules** (non-negotiable — the tool runs unattended):
 
-- **Show** the banner on: bare `notion-wiki`, `notion-wiki init`, `notion-wiki --help`, other human-facing interactive commands.
-- **Suppress** it on: scheduled/unattended runs, any `--json` output, `--quiet`, and whenever stdout is **not a TTY** (auto-detected — piped or redirected output is always clean). Scheduled `notion-wiki pull` therefore logs plain machine-parseable lines, never art.
+- **Show** the banner on: bare `notionwiki`, `notionwiki init`, `notionwiki --help`, other human-facing interactive commands.
+- **Suppress** it on: scheduled/unattended runs, any `--json` output, `--quiet`, and whenever stdout is **not a TTY** (auto-detected — piped or redirected output is always clean). Scheduled `notionwiki pull` therefore logs plain machine-parseable lines, never art.
 
 This keeps the delight for humans and the cleanliness for machines; `typer` + `rich` handle the TTY check and theming in one place.
 
-## 9. Wiki tooling: index + graph UI (`notion-wiki graph`)
+## 9. Wiki tooling: index + graph UI (`notionwiki graph`)
 
-This is a **wiki-layer** concern, fully decoupled from Notion ingestion (§3). `notion-wiki graph`:
+This is a **wiki-layer** concern, fully decoupled from Notion ingestion (§3). `notionwiki graph`:
 
 1. Scans the agent-built `wiki/**/*.md` (excluding the generated `index.md`/`graph.json` themselves), parsing `[[links]]` and frontmatter (`type`, `description`).
 2. Regenerates `wiki/index.md` (catalog) and `wiki/graph.json` (nodes/edges/backlink counts).
@@ -351,62 +351,63 @@ It has **no dependency on Notion, `state.db`, or the ingestion daemon** — it w
 
 ## 10. Scheduling ingestion (Windows / macOS / Linux)
 
-Ingestion is one-shot (`notion-wiki pull`, §3), so the **primary model is a scheduled run** — no persistent process. `notion-wiki service install|uninstall|status` registers a repeating schedule per OS:
+Ingestion is one-shot (`notionwiki pull`, §3), so the **primary model is a scheduled run** — no persistent process. `notionwiki service install|uninstall|status` registers a repeating schedule per OS:
 
 | OS | Mechanism |
 |---|---|
-| **Windows** | **Task Scheduler** task, trigger *At log on* + *Repeat every 1 minute*, action `notion-wiki pull`. No admin, no service, nothing resident between runs. |
-| macOS | **launchd** user LaunchAgent with `StartInterval` (seconds) running `notion-wiki pull` |
-| Linux | **systemd user timer** (`notion-wiki.timer` → `notion-wiki.service` `Type=oneshot`) |
+| **Windows** | **Task Scheduler** task, trigger *At log on* + *Repeat every 1 minute*, action `notionwiki pull`. No admin, no service, nothing resident between runs. |
+| macOS | **launchd** user LaunchAgent with `StartInterval` (seconds) running `notionwiki pull` |
+| Linux | **systemd user timer** (`notionwiki.timer` → `notionwiki.service` `Type=oneshot`) |
 
 Each run reads its baseline from `state.db` and exits, so this is **crash-resilient by construction** — a killed or errored run simply leaves the next scheduled run to catch up; there is nothing to keep alive or restart. Interval is configurable in `config.toml` (default 60 s; Task Scheduler's floor is ~1 min).
 
-**Optional long-lived mode.** `notion-wiki daemon` runs the same pull loop in a single resident process (APScheduler timer), for two cases only: (a) sub-minute cadence below the scheduler's floor, or (b) co-hosting the `notion-wiki graph` UI in one always-on process. It is strictly an alternative to the scheduled model, not required — the default install uses the scheduler above.
+**Optional long-lived mode.** `notionwiki daemon` runs the same pull loop in a single resident process (APScheduler timer), for two cases only: (a) sub-minute cadence below the scheduler's floor, or (b) co-hosting the `notionwiki graph` UI in one always-on process. It is strictly an alternative to the scheduled model, not required — the default install uses the scheduler above.
 
 ## 11. Security
 
 - Notion **internal integration token**, stored in the OS keychain via `keyring` (env-var override for headless setups); never in `config.toml`.
 - The integration is shared **only with the wiki root page** — Notion's permission model enforces the pull scope. (This is a share-time discipline the user must maintain, not something the API scopes automatically — see the Search-scope caveat in §5.1.)
-- **Headless Linux.** `keyring`'s Secret Service backend needs a running keyring daemon (typically only present in a logged-in desktop session), which a headless box running a systemd user timer usually lacks. `notion-wiki service install` on Linux **detects a missing Secret Service** at install time and steers the user to the `NOTION_WIKI_TOKEN` env-var override instead of failing opaquely on first scheduled run — a systemd user timer on a headless server is a mainstream target, not an edge case.
+- **Headless Linux.** `keyring`'s Secret Service backend needs a running keyring daemon (typically only present in a logged-in desktop session), which a headless box running a systemd user timer usually lacks. `notionwiki service install` on Linux **detects a missing Secret Service** at install time and steers the user to the `NOTION_WIKI_TOKEN` env-var override instead of failing opaquely on first scheduled run — a systemd user timer on a headless server is a mainstream target, not an edge case.
 - The only HTTP surface is the optional graph UI, bound to localhost.
 
 ## 12. Project structure & tooling
 
 ```
-notion-wiki/
+notionwiki/
 ├── pyproject.toml              # uv-managed; Python ≥3.11
 ├── src/notion_wiki/
-│   ├── cli.py                  # notion-wiki init | pull | status | graph | service | open ...
+│   ├── cli.py                  # notionwiki init | pull | status | graph | service | open ...
 │   ├── notion/                 # API client (httpx), rate limiter, models
 │   ├── convert/                # blocks → markdown, database rows → pages
 │   ├── ingest/                 # one-shot pull: poller, change detection, overwrite+archive writer
-│   ├── schedule/               # notion-wiki service install/uninstall (Task Scheduler / launchd / systemd)
+│   ├── schedule/               # notionwiki service install/uninstall (Task Scheduler / launchd / systemd)
 │   ├── daemon.py               # OPTIONAL long-lived pull loop (§10); not the default
 │   ├── store/                  # SQLite state, source file I/O, archive
 │   └── graph/                  # wiki-layer: wiki/index.md + wiki/graph.json generator + FastAPI graph UI
 └── tests/                      # pytest; block→markdown conversion is the critical suite
 ```
 
-Key dependencies: `httpx`, `keyring`, `pyyaml`, `typer`, `rich` (welcome panel + themed output, §8.2); `fastapi`+`uvicorn` only for `notion-wiki graph`; `apscheduler` only for the optional `notion-wiki daemon` long-lived mode (the default scheduled model uses the OS scheduler, no library). Tooling: `uv`, `ruff`, `pytest`. Note the dropped v1 dependency on `watchdog` — there is no file watcher.
+Key dependencies: `httpx`, `keyring`, `pyyaml`, `typer`, `rich` (welcome panel + themed output, §8.2); `fastapi`+`uvicorn` only for `notionwiki graph`; `apscheduler` only for the optional `notionwiki daemon` long-lived mode (the default scheduled model uses the OS scheduler, no library). Tooling: `uv`, `ruff`, `pytest`. Note the dropped v1 dependency on `watchdog` — there is no file watcher.
 
 ### 12.1 Distribution — one CLI, any OS
 
 The deliverable is a **single installable CLI** that behaves identically on Windows, macOS, and Linux; nothing else is required to replicate the setup on a fresh workstation.
 
-- Published to PyPI as `notion-wiki`, exposing two console-script entry points — `notion-wiki` and the short alias `nw` (both defined in `pyproject.toml [project.scripts]`, pointing at the same `notion_wiki.cli:app`).
-- Install with `uv tool install notion-wiki` or `pipx install notion-wiki` — both give an isolated, on-`PATH` `notion-wiki` (and `nw`) on every OS. Only prerequisite: Python ≥3.11.
-- Everything is pure Python with cross-platform libraries (`httpx`, `keyring`, `typer`); no OS-specific build step. The *only* platform-aware code is `notion-wiki service install` (§10), which is auto-detected — the user never sees the difference.
-- After install, the entire lifecycle is CLI: `notion-wiki init` (interactive, §8.1) → `notion-wiki pull` / scheduled → `notion-wiki graph`. No config files to edit by hand, no manual scheduler setup.
+- Published to PyPI as `notionwiki`, exposing two console-script entry points — `notionwiki` and the short alias `nw` (both defined in `pyproject.toml [project.scripts]`, pointing at the same `notion_wiki.cli:app`).
+- Install with `uv tool install notionwiki` or `pipx install notionwiki` — both give an isolated, on-`PATH` `notionwiki` (and `nw`) on every OS. Only prerequisite: Python ≥3.11.
+- **npm wrapper (primary advertised install).** The repo also ships as an npm package so `npm install -g notionwiki` works for the Node-native audience. The wrapper (`package.json`, `bin/notionwiki.js`, `scripts/bootstrap.js`, `scripts/postinstall.js`) bundles the Python source and, on install/first run, provisions a managed venv under `~/.notionwiki` (via `uv` when present, else system `python -m venv`), installs the bundled package into it, and execs the Python console script with args passed straight through. The `bin` shim backs both `notionwiki` and `nw`. Env knobs: `NOTION_WIKI_HOME` (runtime location), `NOTION_WIKI_PYTHON` (bring-your-own executable, skip provisioning), `NOTION_WIKI_SKIP_BOOTSTRAP` (defer provisioning to first run). Postinstall failures are non-fatal — the shim retries on first invocation with a clear error.
+- Everything is pure Python with cross-platform libraries (`httpx`, `keyring`, `typer`); no OS-specific build step. The *only* platform-aware code is `notionwiki service install` (§10), which is auto-detected — the user never sees the difference.
+- After install, the entire lifecycle is CLI: `notionwiki init` (interactive, §8.1) → `notionwiki pull` / scheduled → `notionwiki graph`. No config files to edit by hand, no manual scheduler setup.
 
 ## 13. Roadmap
 
 | Phase | Deliverable | Proves |
 |---|---|---|
-| **0.1** | `notion-wiki init` + one-way pull of Notion pages/subpages → flat `raw/notion/*.md` + `daemon_log.md`; **incremental/full-sweep split** (§5.1) and the **single-instance lock** (§5.1) built into `state.db`'s schema and the pull loop from the start, not retrofitted | Auth, traversal, block→markdown conversion, a pull loop safe to run on a schedule |
+| **0.1** | `notionwiki init` + one-way pull of Notion pages/subpages → flat `raw/notion/*.md` + `daemon_log.md`; **incremental/full-sweep split** (§5.1) and the **single-instance lock** (§5.1) built into `state.db`'s schema and the pull loop from the start, not retrofitted | Auth, traversal, block→markdown conversion, a pull loop safe to run on a schedule |
 | **0.2** | Database rows → source pages; overwrite + archive on re-pull; deletion → archive (full reconciliation sweep); settle window (§5.3) | Full raw-layer fidelity to current Notion state |
 | **0.3** | `init` scaffolds `raw/`/`wiki/`/`outputs/` + seeds `CLAUDE.md`/`AGENTS.md` (agent maintains them thereafter, §7); `wiki/index.md`; assistants pointed at the folder | The agent-builds-the-wiki experience |
-| **0.4** | `notion-wiki service install` (scheduled `notion-wiki pull`) on all three OSes; `notion-wiki status`; hardening, backoff | Hands-off scheduled ingestion |
-| **0.5** | `notion-wiki graph`: `wiki/index.md`/`wiki/graph.json` generation + graph UI; agent-run lint over the wiki layer | The visible graph + wiki health |
+| **0.4** | `notionwiki service install` (scheduled `notionwiki pull`) on all three OSes; `notionwiki status`; hardening, backoff | Hands-off scheduled ingestion |
+| **0.5** | `notionwiki graph`: `wiki/index.md`/`wiki/graph.json` generation + graph UI; agent-run lint over the wiki layer | The visible graph + wiki health |
 | v2 ideas | Webhook-mode pulls via tunnel (near-instant), embeddings/hybrid search, daemon-enforced `raw/` immutability, **optional write-back** if bidirectionality is ever wanted again | — |
 
 ## 14. Open questions (non-blocking)

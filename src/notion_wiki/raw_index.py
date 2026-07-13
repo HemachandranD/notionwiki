@@ -1,4 +1,4 @@
-"""Read-side index over raw/notion/*.md — backs `notion-wiki open` (docs/design.md §8).
+"""Read-side index over raw/notion/*.md — backs `notionwiki open` (docs/design.md §8).
 
 Pure frontmatter scanning, no network. `find_source` implements the
 exact-filename -> substring-filename -> substring-title matching cascade,

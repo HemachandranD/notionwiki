@@ -1,5 +1,5 @@
 """macOS launchd integration (docs/design.md §10): a user LaunchAgent with
-`StartInterval` (seconds) running `notion-wiki pull`."""
+`StartInterval` (seconds) running `notionwiki pull`."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 from notion_wiki.schedule.base import ScheduleStatus, pull_argv
 
-LABEL = "com.notion-wiki.pull"
+LABEL = "com.notionwiki.pull"
 
 
 def _launch_agents_dir() -> Path:

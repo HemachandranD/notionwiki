@@ -14,8 +14,8 @@ from pathlib import Path
 def get_state_dir() -> Path:
     """Resolve the bridge's state directory.
 
-    Precedence: $NOTION_WIKI_STATE_DIR override, then %APPDATA%\\notion-wiki on
-    Windows, then $XDG_STATE_HOME/notion-wiki, then ~/.notion-wiki.
+    Precedence: $NOTION_WIKI_STATE_DIR override, then %APPDATA%\\notionwiki on
+    Windows, then $XDG_STATE_HOME/notionwiki, then ~/.notionwiki.
     """
     override = os.environ.get("NOTION_WIKI_STATE_DIR")
     if override:
@@ -24,13 +24,13 @@ def get_state_dir() -> Path:
     if sys.platform == "win32":
         appdata = os.environ.get("APPDATA")
         if appdata:
-            return Path(appdata) / "notion-wiki"
+            return Path(appdata) / "notionwiki"
 
     xdg_state_home = os.environ.get("XDG_STATE_HOME")
     if xdg_state_home:
-        return Path(xdg_state_home) / "notion-wiki"
+        return Path(xdg_state_home) / "notionwiki"
 
-    return Path.home() / ".notion-wiki"
+    return Path.home() / ".notionwiki"
 
 
 def config_path(state_dir: Path | None = None) -> Path:

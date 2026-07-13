@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Node (npm wrapper)
+node_modules/
+npm-debug.log*

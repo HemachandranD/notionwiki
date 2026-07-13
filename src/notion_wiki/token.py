@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import keyring
 
-SERVICE_NAME = "notion-wiki"
+SERVICE_NAME = "notionwiki"
 KEY_NAME = "notion_token"
 ENV_VAR = "NOTION_WIKI_TOKEN"
 

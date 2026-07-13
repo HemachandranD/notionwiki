@@ -1,6 +1,6 @@
 """Cross-platform single-instance lock for the pull loop (docs/design.md §5.1).
 
-A manual `notion-wiki pull` can overlap a scheduled tick, and a slow run
+A manual `notionwiki pull` can overlap a scheduled tick, and a slow run
 (large workspace, 429 backoff) can exceed the ~60s cadence and overlap the
 next scheduled tick too. Two writers to state.db and raw/*.md is a
 corruption path, so every run takes this lock before doing anything else;
@@ -15,7 +15,7 @@ from typing import IO
 
 
 class LockAcquisitionError(RuntimeError):
-    """Raised when another notion-wiki pull already holds the lock."""
+    """Raised when another notionwiki pull already holds the lock."""
 
 
 class SingleInstanceLock:
@@ -39,7 +39,7 @@ class SingleInstanceLock:
         except OSError as exc:
             fh.close()
             raise LockAcquisitionError(
-                f"another notion-wiki pull already holds the lock at {self._path}"
+                f"another notionwiki pull already holds the lock at {self._path}"
             ) from exc
         self._fh = fh
 

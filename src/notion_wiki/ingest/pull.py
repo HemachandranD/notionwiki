@@ -1,4 +1,4 @@
-"""PullRunner: the one-shot `notion-wiki pull` cycle (docs/design.md §3, §5).
+"""PullRunner: the one-shot `notionwiki pull` cycle (docs/design.md §3, §5).
 
 Ties together the poller, converter, writer, state.db, and daemon_log for a
 single run — either incremental (default) or a full reconciliation sweep.

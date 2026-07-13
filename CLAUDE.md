@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-notion-wiki is a **one-way ingestion bridge** that pulls a Notion workspace into the immutable Raw Sources layer of an LLM Wiki, inspired by Karpathy's LLM Wiki (`llm_wiki.md`). Notion is the source (authored from anywhere); a background daemon pulls it, converts pages to markdown, and files them as raw source material an assistant then builds a wiki on top of. The repository is currently greenfield — it contains only the README, LICENSE, docs, and a Python-oriented .gitignore. No source code, dependency manifest, or tooling configuration exists yet.
+notionwiki is a **one-way ingestion bridge** that pulls a Notion workspace into the immutable Raw Sources layer of an LLM Wiki, inspired by Karpathy's LLM Wiki (`llm_wiki.md`). Notion is the source (authored from anywhere); a background daemon pulls it, converts pages to markdown, and files them as raw source material an assistant then builds a wiki on top of. The repository is currently greenfield — it contains only the README, LICENSE, docs, and a Python-oriented .gitignore. No source code, dependency manifest, or tooling configuration exists yet.
 
 ## Design
 
@@ -15,9 +15,10 @@ The architecture is specified in `docs/design.md` (**v2 — one-way redesign**; 
 - **Raw layer:** pulled pages land as **flat files** in `raw/notion/` (Notion hierarchy kept in frontmatter, not folders); **database rows become individual source pages**; on re-pull the daemon **overwrites in place and archives the prior version** to `archive/`; deletions in Notion move the file to `archive/`. All of `raw/` is **read-only to agents by convention** (stated in `AGENTS.md`/`CLAUDE.md` at the wiki root), not daemon-enforced.
 - **Logging:** `raw/notion/daemon_log.md` is a machine-parseable ingestion ledger (owned by the daemon), kept **separate** from the wiki's agent-owned `wiki/log.md`.
 - **Wiki layer:** follows the LLM Wiki pattern — the schema lives directly in the wiki root's `CLAUDE.md`/`AGENTS.md` (identical twins the agent maintains), a generated `wiki/index.md` (and `wiki/graph.json`), and an agent-run lint pass over the wiki pages.
-- **Layer separation:** the ingestion daemon does Notion→`raw/notion/` and nothing else. Wiki-layer bookkeeping (`wiki/index.md`/`wiki/graph.json` generation + the localhost:7777 force-directed graph UI) is a **separate `notion-wiki graph` command**, decoupled from Notion — not part of the ingestion daemon.
-- **Ingestion runs on a schedule, not a resident process.** `notion-wiki pull` is a one-shot command; `notion-wiki service install` registers it with the OS scheduler (Task Scheduler / launchd `StartInterval` / systemd timer), default ~60 s. Each run reads its baseline from `state.db` and exits — crash-resilient by construction. A long-lived `notion-wiki daemon` mode exists only as an option (sub-minute cadence, or co-hosting the graph UI).
-- **Stack & interface:** Python (uv-managed); assistants work directly on the mirror files and run the `notion-wiki` CLI (alias `nw`; subcommands `init`/`pull`/`status`/`graph`/`service`/`open` — note **no `sync`/`push`**). Importable Python module is `notion_wiki` (`src/notion_wiki/`).
+- **Layer separation:** the ingestion daemon does Notion→`raw/notion/` and nothing else. Wiki-layer bookkeeping (`wiki/index.md`/`wiki/graph.json` generation + the localhost:7777 force-directed graph UI) is a **separate `notionwiki graph` command**, decoupled from Notion — not part of the ingestion daemon.
+- **Ingestion runs on a schedule, not a resident process.** `notionwiki pull` is a one-shot command; `notionwiki service install` registers it with the OS scheduler (Task Scheduler / launchd `StartInterval` / systemd timer), default ~60 s. Each run reads its baseline from `state.db` and exits — crash-resilient by construction. A long-lived `notionwiki daemon` mode exists only as an option (sub-minute cadence, or co-hosting the graph UI).
+- **Stack & interface:** Python (uv-managed); assistants work directly on the mirror files and run the `notionwiki` CLI (alias `nw`; subcommands `init`/`pull`/`status`/`graph`/`service`/`open` — note **no `sync`/`push`**). Importable Python module is `notion_wiki` (`src/notion_wiki/`).
+- **Distribution:** two front doors to the same Python CLI — `uv tool install`/`pipx install` from PyPI, and an npm wrapper (`npm install -g notionwiki`, the README's headline install) that bootstraps a managed Python venv and execs the console script. The npm layer is `package.json` + `bin/notionwiki.js` + `scripts/bootstrap.js` + `scripts/postinstall.js`; it adds no Python behavior, only packaging.
 
 Consult the design doc before adding code and keep it updated as implementation diverges.
 
@@ -27,7 +28,9 @@ Roadmap 0.1–0.5 implemented: `src/notion_wiki/` (Notion API client, block→ma
 SQLite state store, ingestion pull loop, CLI, OS scheduling, wiki graph tooling, optional daemon)
 plus a full `tests/` suite (all HTTP mocked via `respx`; no live Notion workspace required).
 
-**Package manager:** `uv`, Python ≥3.11.
+**Package manager:** `uv`, Python ≥3.11. An npm wrapper (`package.json`, `bin/`, `scripts/`) also
+ships for `npm install -g notionwiki`; it provisions a managed Python venv and execs the CLI —
+edit Python for behavior, the Node shim only for packaging/bootstrap logic.
 
 ```bash
 uv sync --extra graph --extra daemon   # install with optional extras (graph UI, long-lived daemon)
@@ -35,7 +38,7 @@ uv run pytest                          # run the full test suite
 uv run pytest tests/test_convert_blocks.py -q          # a single test file
 uv run pytest tests/test_convert_blocks.py::test_plain_paragraph  # a single test
 uv run ruff check src tests            # lint
-uv run notion-wiki --help              # run the CLI in place (alias: `uv run nw`)
+uv run notionwiki --help              # run the CLI in place (alias: `uv run nw`)
 ```
 
 **Architecture (matches `docs/design.md` §12):**
@@ -71,5 +74,5 @@ dev-only test dependency; database scope (§14.2) is resolved once at `init` tim
 - Keep `docs/design.md` and this file in sync as implementation diverges further (e.g. a real
   page-tree traversal for the full sweep instead of exhaustive Search, embeddings/hybrid search
   per §14.3, daemon-enforced `raw/` immutability).
-- No live Notion workspace has been used against this codebase yet — `notion-wiki init` and a
-  first `notion-wiki pull` against a real integration token are the natural next manual test.
+- No live Notion workspace has been used against this codebase yet — `notionwiki init` and a
+  first `notionwiki pull` against a real integration token are the natural next manual test.

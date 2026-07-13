@@ -1,8 +1,8 @@
 """Optional long-lived pull loop (docs/design.md §10).
 
-Strictly an alternative to the scheduled model (`notion-wiki service install`,
+Strictly an alternative to the scheduled model (`notionwiki service install`,
 schedule/) — for two cases only: sub-minute cadence below the OS scheduler's
-floor, or co-hosting the `notion-wiki graph` UI in one always-on process.
+floor, or co-hosting the `notionwiki graph` UI in one always-on process.
 `apscheduler` is only ever imported here, behind the `[daemon]` extra.
 """
 
@@ -17,7 +17,7 @@ from notion_wiki.store.db import StateDB
 
 
 def tick_once(config: Config, token: str, state_dir: Path) -> None:
-    """One pull cycle — the same thing a scheduled `notion-wiki pull` invocation does."""
+    """One pull cycle — the same thing a scheduled `notionwiki pull` invocation does."""
     from notion_wiki.ingest.pull import PullRunner
 
     client = NotionClient(token)

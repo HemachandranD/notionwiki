@@ -18,7 +18,7 @@ class Scheduler(Protocol):
     name: str
 
     def install(self, interval_minutes: int) -> list[str]:
-        """Register the repeating `notion-wiki pull` schedule. Returns a list of
+        """Register the repeating `notionwiki pull` schedule. Returns a list of
         advisory warning strings (empty if none) — e.g. Linux's headless
         Secret Service warning (§11)."""
         ...
@@ -43,11 +43,11 @@ def detect_scheduler() -> Scheduler:
 
 
 def pull_argv() -> list[str]:
-    """Argv for invoking `notion-wiki pull` — prefer the installed console script,
+    """Argv for invoking `notionwiki pull` — prefer the installed console script,
     fall back to `python -m notion_wiki.cli` if it's not on PATH."""
     import shutil
 
-    exe = shutil.which("notion-wiki")
+    exe = shutil.which("notionwiki")
     if exe:
         return [exe, "pull"]
     return [sys.executable, "-m", "notion_wiki.cli", "pull"]
