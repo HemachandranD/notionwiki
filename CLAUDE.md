@@ -69,7 +69,13 @@ uv run notionwiki --help              # run the CLI in place (alias: `uv run nw`
   `linux.py` systemd user timer + headless Secret Service detection), dispatched by
   `detect_scheduler()`.
 - `graph/` — `scanner.py`/`index_gen.py`/`graph_gen.py`/`lint.py` (pure wiki-layer tooling, no
-  Notion dependency) + `server.py` (FastAPI, vendored force-directed UI, `127.0.0.1:7777` only).
+  Notion dependency) + `server.py` (FastAPI, `127.0.0.1:7777` only). The UI is the vendored
+  `graph/static/force-graph.min.js` (vasturiano's canvas force-graph, self-contained so it works
+  offline) — pan/zoom/drag, nodes colored by type and sized by backlinks, hover panel. Routes:
+  `/graph` (HTML), `/graph.json` (data), `/force-graph.min.js` (the bundle), and `/` → `/graph`
+  redirect. The `.js` asset must stay in both the hatch wheel (automatic — it's inside the package)
+  and the npm `files` glob (`src/notion_wiki/graph/static/*.js`, added explicitly since `src/**/*.py`
+  would exclude it).
 - `daemon.py` — optional long-lived loop (APScheduler), lazy-imported behind the `[daemon]` extra.
 
 **Deviations from `docs/design.md` filled in during implementation** (see the plan file for full

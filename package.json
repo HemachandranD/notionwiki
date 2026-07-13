@@ -20,6 +20,7 @@
     "bin/",
     "scripts/",
     "src/**/*.py",
+    "src/notion_wiki/graph/static/*.js",
     "pyproject.toml",
     "uv.lock",
     "README.md",
