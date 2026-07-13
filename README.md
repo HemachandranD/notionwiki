@@ -48,7 +48,7 @@ notionwiki service install   # registers `pull` with your OS scheduler (~60s cad
 | `pull` | One-shot ingestion run. `--full` forces a full reconciliation sweep; `--json` for machine-readable output. |
 | `status` | Summary of the last run (`--json`). |
 | `open <query>` | Look up a raw page by filename, slug, or title substring. |
-| `graph` | Generate `wiki/index.md` / `wiki/graph.json`. `--serve` hosts the force-directed graph UI at `127.0.0.1:7777`. |
+| `graph` | Generate `wiki/index.md` / `wiki/graph.json`. `--serve` hosts the force-directed graph UI at `127.0.0.1:7777` — pan/zoom/drag nodes, and click one to open a drawer with the rendered wiki page plus "Open in Notion" links back to its raw sources. |
 | `lint` | Lint pass over the wiki pages. |
 | `service install \| uninstall \| status` | Register/remove `pull` with the OS scheduler (Task Scheduler / launchd / systemd timer). |
 | `daemon` | Optional long-lived loop instead of OS scheduling (`--interval-seconds`, `--serve-graph`). |
