@@ -37,7 +37,14 @@ def download_asset(url: str, assets_dir: Path, *, http_client: httpx.Client | No
 
     Returns the path relative to the feeder dir, e.g. "assets/sha256-<hash>.png".
     Already-present files (same hash) are not re-downloaded.
+
+    A non-fetchable reference (empty, relative, `data:`, or an internal link that
+    isn't http/https) is returned unchanged so the markdown keeps the original
+    target instead of the pull crashing on it.
     """
+    if not url or not url.lower().startswith(("http://", "https://")):
+        return url
+
     client = http_client or httpx.Client(timeout=30.0, follow_redirects=True)
     owns_client = http_client is None
     try:

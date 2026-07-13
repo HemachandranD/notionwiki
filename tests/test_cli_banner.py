@@ -1,6 +1,19 @@
+import io
 from datetime import UTC, datetime, timedelta
 
-from notion_wiki.cli import _banner_suppressed, _humanize_age
+from notion_wiki.cli import _banner_suppressed, _force_utf8_output, _humanize_age
+
+
+def test_force_utf8_output_survives_legacy_cp1252_stream(monkeypatch):
+    """A Windows console defaulting to cp1252 cannot encode the ✓ glyphs in our
+    output; _force_utf8_output must reconfigure the stream so printing them does
+    not raise UnicodeEncodeError (regression: `notionwiki pull` aborting on \\u2713)."""
+    legacy = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr("sys.stdout", legacy)
+    _force_utf8_output()
+    legacy.write("✓ pull complete")  # would raise under cp1252 without reconfigure
+    legacy.flush()
+    assert legacy.buffer.getvalue().decode("utf-8") == "✓ pull complete"
 
 
 def test_banner_suppressed_by_json_flag():

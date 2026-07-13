@@ -98,11 +98,16 @@ function writeMarker(strategy) {
   );
 }
 
+// Install the full CLI, including the graph UI (fastapi/uvicorn) and the
+// optional daemon (apscheduler) — otherwise `notionwiki graph --serve` and
+// `notionwiki daemon` fail at import time in the managed runtime.
+const INSTALL_TARGET = `${PACKAGE_ROOT}[graph,daemon]`;
+
 function installWithUv(venv, log) {
   log("Provisioning Python runtime with uv…");
   const mkvenv = run("uv", ["venv", "--python", ">=3.11", venv], { stdio: "inherit" });
   if (mkvenv.status !== 0) return false;
-  const install = run("uv", ["pip", "install", "--python", venvPython(venv), PACKAGE_ROOT], {
+  const install = run("uv", ["pip", "install", "--python", venvPython(venv), INSTALL_TARGET], {
     stdio: "inherit",
   });
   return install.status === 0;
@@ -114,7 +119,7 @@ function installWithVenv(venv, python, log) {
   if (mkvenv.status !== 0) return false;
   const py = venvPython(venv);
   run(py, ["-m", "pip", "install", "--quiet", "--upgrade", "pip"], { stdio: "inherit" });
-  const install = run(py, ["-m", "pip", "install", PACKAGE_ROOT], { stdio: "inherit" });
+  const install = run(py, ["-m", "pip", "install", INSTALL_TARGET], { stdio: "inherit" });
   return install.status === 0;
 }
 

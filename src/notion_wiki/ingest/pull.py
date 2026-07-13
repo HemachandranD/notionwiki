@@ -175,6 +175,12 @@ class PullRunner:
     ) -> None:
         existing = self.db.get_page(page.id)
 
+        # Self-heal state/file divergence: if we have a record but the local file
+        # is gone (wiki root moved, manual delete), forget the record and re-pull
+        # the page as new rather than skipping it as "unchanged".
+        if existing and not existing.deleted and not (self.feeder_dir / existing.filename).exists():
+            existing = None
+
         # Timestamp gate (§5.1): skip the block fetch entirely for pages whose
         # last_edited_time hasn't moved, unless they're mid-settle (§5.3).
         if (
@@ -198,15 +204,29 @@ class PullRunner:
             )
             return
 
-        body = render_blocks(
-            blocks,
-            resolve_mention=self.db.resolve_slug,
-            download_asset=lambda url: download_asset(url, self.assets_dir),
-        )
-        if kind == "database_row":
-            table = render_property_table(page.properties)
-            if table:
-                body = f"{table}\n\n{body}" if body else table
+        try:
+            body = render_blocks(
+                blocks,
+                resolve_mention=self.db.resolve_slug,
+                download_asset=lambda url: download_asset(url, self.assets_dir),
+            )
+            if kind == "database_row":
+                table = render_property_table(page.properties)
+                if table:
+                    body = f"{table}\n\n{body}" if body else table
+        except Exception as exc:  # noqa: BLE001 - one bad page must not abort the batch (§6)
+            stats.errors += 1
+            self.log.append(
+                LogEntry(
+                    datetime.now(UTC).isoformat(),
+                    "error",
+                    page.id,
+                    page.title,
+                    "render",
+                    [str(exc)],
+                )
+            )
+            return
 
         new_hash = content_hash(body)
         outcome = decide_outcome(

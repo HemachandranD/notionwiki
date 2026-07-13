@@ -266,6 +266,7 @@ No agent-facing server. The contract is the wiki directory plus a small CLI.
 | `notionwiki pull` | Force an immediate pull/convert/write cycle (the schedule handles it otherwise) — *ingestion* |
 | `notionwiki status` | Ingestion health, last pull time, recent errors (reads `daemon_log.md`) — *ingestion* |
 | `notionwiki graph` | Regenerate `wiki/index.md`/`wiki/graph.json` from the wiki pages and serve the graph UI at localhost:7777 — *wiki layer* (§9) |
+| `notionwiki config show\|token\|pages\|databases` | View or update saved settings after `init` — replace the token, re-run the page-scope picker, or re-select databases without re-running the whole wizard (reuses the `init` prompt helpers) |
 | `notionwiki service install` | Register scheduled `notionwiki pull` with the OS scheduler (§10) — one command, OS detected automatically |
 | `notionwiki open <page>` | Print the Notion URL / local path for a source — `<page>` is matched as a **filename/slug** first (exact, then substring), falling back to a case-insensitive **title substring** match against frontmatter if no filename matches; ambiguous matches list candidates instead of guessing |
 

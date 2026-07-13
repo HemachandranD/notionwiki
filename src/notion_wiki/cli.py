@@ -36,6 +36,30 @@ BRAND = "notionwiki"
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 service_app = typer.Typer(add_completion=False, help="Manage the scheduled notionwiki pull")
 app.add_typer(service_app, name="service")
+config_app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    help="View or update saved settings (token, pages, databases) without re-running init",
+)
+app.add_typer(config_app, name="config")
+
+
+def _force_utf8_output() -> None:
+    """Windows consoles default to a legacy cp1252 codec that cannot encode the
+    checkmarks/arrows in our output — writing `✓` raises UnicodeEncodeError and
+    aborts the command (worst when stdout is piped). Reconfigure both streams to
+    UTF-8, with errors="replace" so an exotic terminal degrades gracefully
+    instead of crashing."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+
+
+_force_utf8_output()
 console = Console()
 
 
@@ -201,12 +225,20 @@ def _mask_secret(secret: str) -> str:
     return f"{secret[:4]}...{secret[-4:]} ({len(secret)} chars)"
 
 
-def _ask_path(label: str, default: str) -> Path:
+# A subtle step marker replaces questionary's default "?" so each line reads as
+# a single clean prompt; the same marker prefixes the non-TTY line-prompt fallback.
+def _flabel(qmark: str, label: str) -> str:
+    return f"{qmark} {label}"
+
+
+def _ask_path(label: str, default: str, *, qmark: str = "›") -> Path:
     if _tui_available():
         try:
             import questionary
 
-            answer = questionary.path(label, default=default, only_directories=True).ask()
+            answer = questionary.path(
+                label, default=default, only_directories=True, qmark=qmark
+            ).ask()
             if answer is None:
                 raise typer.Abort()
             return Path(answer.strip() or default).expanduser()
@@ -214,15 +246,15 @@ def _ask_path(label: str, default: str) -> Path:
             raise
         except Exception:  # noqa: BLE001 - degrade to a line prompt
             _disable_tui()
-    return Path(typer.prompt(label, default=default)).expanduser()
+    return Path(typer.prompt(_flabel(qmark, label), default=default)).expanduser()
 
 
-def _ask_token(label: str) -> str:
+def _ask_token(label: str, *, qmark: str = "›") -> str:
     if _tui_available():
         try:
             import questionary
 
-            token = questionary.password(label).ask()
+            token = questionary.password(label, qmark=qmark).ask()
             if token is None:
                 raise typer.Abort()
             return token.strip()
@@ -230,43 +262,77 @@ def _ask_token(label: str) -> str:
             raise
         except Exception:  # noqa: BLE001 - degrade to a line prompt
             _disable_tui()
-    return typer.prompt(label, hide_input=True).strip()
+    return typer.prompt(_flabel(qmark, label), hide_input=True).strip()
 
 
-def _confirm(label: str, *, default: bool = True) -> bool:
+def _confirm(label: str, *, default: bool = True, qmark: str = "›") -> bool:
     if _tui_available():
         try:
             import questionary
 
-            answer = questionary.confirm(label, default=default, auto_enter=False).ask()
+            answer = questionary.confirm(
+                label, default=default, auto_enter=False, qmark=qmark
+            ).ask()
             return default if answer is None else bool(answer)
         except Exception:  # noqa: BLE001 - degrade to a line prompt
             _disable_tui()
-    return typer.confirm(label, default=default)
+    return typer.confirm(_flabel(qmark, label), default=default)
 
 
 _ALL = "__all__"
 _PASTE = "__paste__"
+_PAGE_PICKER_LIMIT = 200
 
 
-def _select_scope_pages(candidates: list) -> list[str]:
+def _ordered_page_tree(pages: list) -> list[tuple[object, int]]:
+    """Order pages as a parent→child tree (each with a depth) so the picker reads
+    as a hierarchy instead of a flat, arbitrarily-sorted list. Pages whose parent
+    isn't among the shared set are treated as top-level roots; any left unvisited
+    (cycles/orphans) are appended so nothing is dropped."""
+    by_id = {p.id: p for p in pages}
+    children: dict[str | None, list] = {}
+    for p in pages:
+        parent = p.parent_id if (p.parent_type == "page_id" and p.parent_id in by_id) else None
+        children.setdefault(parent, []).append(p)
+
+    ordered: list[tuple[object, int]] = []
+    seen: set[str] = set()
+
+    def walk(parent: str | None, depth: int) -> None:
+        for p in sorted(children.get(parent, []), key=lambda x: (x.title or "").lower()):
+            if p.id in seen:
+                continue
+            seen.add(p.id)
+            ordered.append((p, depth))
+            walk(p.id, depth + 1)
+
+    walk(None, 0)
+    ordered += [(p, 0) for p in pages if p.id not in seen]
+    return ordered
+
+
+def _select_scope_pages(candidates: list, *, qmark: str = "›") -> list[str]:
     """Pages to scope ingestion to; [] means "all pages shared with the integration"."""
     if _tui_available():
         try:
             import questionary
 
-            choices = [
+            choices: list = [
                 questionary.Choice(
                     "All pages shared with the integration", value=_ALL, checked=True
                 )
             ]
-            choices += [
-                questionary.Choice(p.title or "(untitled)", value=p.id) for p in candidates
-            ]
+            if candidates:
+                choices.append(questionary.Separator())
+                for page, depth in _ordered_page_tree(candidates):
+                    title = ("  " * depth) + (page.title or "(untitled)")
+                    choices.append(questionary.Choice(title, value=page.id))
+            choices.append(questionary.Separator())
             choices.append(questionary.Choice("Paste a page URL...", value=_PASTE))
             picked = questionary.checkbox(
                 "Which pages should the wiki pull?  (space toggles, enter confirms)",
                 choices=choices,
+                qmark=qmark,
             ).ask()
             if picked is None:
                 raise typer.Abort()
@@ -304,7 +370,7 @@ def _select_scope_pages(candidates: list) -> list[str]:
     return ids
 
 
-def _select_databases(raw_databases: list[dict]) -> list[DatabaseRef]:
+def _select_databases(raw_databases: list[dict], *, qmark: str = "›") -> list[DatabaseRef]:
     if _tui_available():
         try:
             import questionary
@@ -316,6 +382,7 @@ def _select_databases(raw_databases: list[dict]) -> list[DatabaseRef]:
             picked = questionary.checkbox(
                 "Which databases should the wiki pull?  (space toggles, enter confirms)",
                 choices=choices,
+                qmark=qmark,
             ).ask()
             if picked is None:
                 raise typer.Abort()
@@ -360,40 +427,46 @@ def init() -> None:
     existing = load_config() if config_exists() else None
     default_root = str(existing.wiki_root) if existing else str(Path.home() / ".notionwiki")
 
-    console.print("1. Where should the wiki live?")
-    wiki_root = _ask_path("Wiki root", default_root)
+    wiki_root = _ask_path(
+        "Where should the wiki live? (defaults to this location)", default_root, qmark="1"
+    )
 
-    console.print("2. Paste your Notion internal integration token:")
-    token = _ask_token("Token")
+    token = _ask_token("Paste your Notion integration token", qmark="2")
     client = NotionClient(token)
     try:
-        pages = [Page.from_api(raw) for raw in itertools.islice(client.search(), 25)]
+        pages = [
+            Page.from_api(raw) for raw in itertools.islice(client.search(), _PAGE_PICKER_LIMIT)
+        ]
     except Exception as exc:  # noqa: BLE001 - surfaced directly to the operator
         console.print(f"[red]Could not validate token:[/red] {exc}")
         raise typer.Exit(1) from exc
-    console.print(f"   [green]token valid[/green]  [dim]{_mask_secret(token)}[/dim]")
+    console.print(f"  [green]token valid[/green]  [dim]{_mask_secret(token)}[/dim]")
 
-    console.print("3. Which Notion pages should the wiki pull? (share them with the integration)")
+    # Database rows surface as pages with a database parent; they belong to the
+    # database step (§5.2), not the page-scope picker.
+    page_candidates = [p for p in pages if p.parent_type != "database_id"]
     console.print(
-        "   [dim]Keep 'All ...' selected to pull everything shared, or pick specific pages — "
+        "[dim]Keep 'All ...' selected to pull everything shared, or pick specific pages — "
         "their sub-pages are always included.[/dim]"
     )
-    root_page_ids = _select_scope_pages(pages[:15])
+    if len(pages) >= _PAGE_PICKER_LIMIT:
+        console.print(
+            f"  [dim]Showing the first {_PAGE_PICKER_LIMIT} shared pages; "
+            "use 'All ...' or paste a URL if one isn't listed.[/dim]"
+        )
+    root_page_ids = _select_scope_pages(page_candidates, qmark="3")
 
-    console.print("4. Also pull databases?")
     databases: list[DatabaseRef] = []
-    if _confirm("Pull databases too?", default=True):
+    if _confirm("Also pull databases?", default=True, qmark="4"):
         raw_databases = list(itertools.islice(client.search_databases(), 25))
         if raw_databases:
-            databases = _select_databases(raw_databases)
+            databases = _select_databases(raw_databases, qmark="4")
         else:
-            console.print("   [dim]No databases shared with the integration.[/dim]")
+            console.print("  [dim]No databases shared with the integration.[/dim]")
 
-    console.print("5. Pull interval in minutes")
-    interval_minutes = max(1, typer.prompt("   Interval", default=1, type=int))
+    interval_minutes = max(1, typer.prompt("5 Pull interval in minutes", default=1, type=int))
 
-    console.print("6. Install the background schedule now?")
-    install_schedule = _confirm("Install the background schedule now?", default=True)
+    install_schedule = _confirm("Install the background schedule now?", default=True, qmark="6")
 
     config = Config(
         wiki_root=wiki_root,
@@ -465,6 +538,104 @@ def service_status() -> None:
         console.print(f"[yellow]Not installed[/yellow] ({scheduler.name}): {status.detail}")
 
 
+def _require_config() -> Config:
+    if not config_exists():
+        console.print("[red]Not initialized.[/red] Run `notionwiki init` first.")
+        raise typer.Exit(1)
+    return load_config()
+
+
+def _require_client() -> NotionClient:
+    token = get_token()
+    if not token:
+        console.print(
+            "[red]No Notion token found.[/red] Run `notionwiki config token` "
+            "or set NOTION_WIKI_TOKEN."
+        )
+        raise typer.Exit(1)
+    return NotionClient(token)
+
+
+@config_app.command("show")
+def config_show() -> None:
+    """Print the current settings."""
+    config = _require_config()
+    scope = (
+        f"{len(config.root_page_ids)} selected page(s) (+ sub-pages)"
+        if config.root_page_ids
+        else "all pages shared with the integration"
+    )
+    dbs = ", ".join(db.name for db in config.databases) or "none"
+    console.print("[bold]notionwiki config[/bold]")
+    console.print(f"  wiki root   {config.wiki_root}")
+    console.print(f"  token       {'[green]set[/green]' if get_token() else '[red]not set[/red]'}")
+    console.print(f"  page scope  {scope}")
+    console.print(f"  databases   {dbs}")
+    console.print(f"  interval    {config.interval_minutes} min")
+
+
+@config_app.command("token")
+def config_token() -> None:
+    """Replace the stored Notion integration token."""
+    _require_config()
+    token = _ask_token("Paste your new Notion integration token")
+    client = NotionClient(token)
+    try:
+        next(iter(client.search()), None)  # validates auth
+    except Exception as exc:  # noqa: BLE001 - surfaced directly to the operator
+        console.print(f"[red]Could not validate token:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    finally:
+        client.close()
+    set_token(token)
+    console.print(f"[green]✓ Token updated[/green]  [dim]{_mask_secret(token)}[/dim]")
+
+
+@config_app.command("pages")
+def config_pages() -> None:
+    """Re-select which pages (and their sub-pages) to pull."""
+    from notion_wiki.notion.models import Page
+
+    config = _require_config()
+    client = _require_client()
+    try:
+        pages = [
+            Page.from_api(raw) for raw in itertools.islice(client.search(), _PAGE_PICKER_LIMIT)
+        ]
+    finally:
+        client.close()
+    candidates = [p for p in pages if p.parent_type != "database_id"]
+    config.root_page_ids = _select_scope_pages(candidates, qmark="›")
+    save_config(config)
+    scope = f"{len(config.root_page_ids)} page(s)" if config.root_page_ids else "all shared pages"
+    console.print(
+        f"[green]✓ Page scope updated[/green] — {scope}.  "
+        "[dim]Run `notionwiki pull --full` to apply.[/dim]"
+    )
+
+
+@config_app.command("databases")
+def config_databases() -> None:
+    """Re-select which databases to pull."""
+    config = _require_config()
+    client = _require_client()
+    try:
+        raw_databases = list(itertools.islice(client.search_databases(), 50))
+    finally:
+        client.close()
+    if not raw_databases:
+        console.print("[yellow]No databases shared with the integration.[/yellow]")
+        config.databases = []
+    else:
+        config.databases = _select_databases(raw_databases, qmark="›")
+    save_config(config)
+    names = ", ".join(db.name for db in config.databases) or "none"
+    console.print(
+        f"[green]✓ Databases updated[/green] — {names}.  "
+        "[dim]Run `notionwiki pull --full` to apply.[/dim]"
+    )
+
+
 @app.command()
 def daemon(
     interval_seconds: float = typer.Option(
@@ -516,15 +687,37 @@ def graph(
 
     generate_index(config.wiki_root)
     graph_data = generate_graph(config.wiki_root)
+    node_count = len(graph_data["nodes"])
     console.print(
-        f"[green]Regenerated[/green] wiki/index.md and wiki/graph.json "
-        f"({len(graph_data['nodes'])} nodes, {len(graph_data['edges'])} edges)."
+        f"[green]✓ Regenerated[/green] wiki/index.md and wiki/graph.json "
+        f"[dim]({node_count} nodes, {len(graph_data['edges'])} edges)[/dim]"
     )
+    if node_count == 0:
+        console.print(
+            "  [dim]The graph maps the agent-built [italic]wiki/[/italic] layer, which is still "
+            "empty — pull sources with `notionwiki pull`, then have your assistant build "
+            "wiki pages from them.[/dim]"
+        )
 
     if serve:
-        from notion_wiki.graph.server import serve as serve_graph
+        try:
+            from notion_wiki.graph.server import serve as serve_graph
+        except ImportError:
+            console.print(
+                "[red]The graph UI needs the 'graph' extra (fastapi/uvicorn).[/red] "
+                "Reinstall with `uv tool install 'notionwiki[graph]'`, or run `pip install "
+                "'fastapi' 'uvicorn'` in the runtime."
+            )
+            raise typer.Exit(1) from None
 
-        console.print(f"Serving graph UI at http://127.0.0.1:{port}/graph")
+        url = f"http://127.0.0.1:{port}/graph"
+        console.print(
+            f"[green]Serving graph UI[/green] at [link={url}]{url}[/link]  "
+            "[dim](Ctrl+C to stop)[/dim]"
+        )
+        import webbrowser
+
+        webbrowser.open(url)
         serve_graph(config.wiki_root, port=port)
 
 
@@ -603,17 +796,47 @@ def pull(
                     "unchanged": stats.unchanged,
                     "renamed": stats.renamed,
                     "archived": stats.archived,
+                    "settling": stats.settling,
                     "errors": stats.errors,
                 }
             )
         )
         return
 
-    console.print(
-        f"[green]Pull complete.[/green] new={stats.new} updated={stats.updated} "
-        f"unchanged={stats.unchanged} renamed={stats.renamed} archived={stats.archived} "
-        f"errors={stats.errors}"
-    )
+    parts = []
+    if stats.new:
+        parts.append(f"[green]{stats.new} new[/green]")
+    if stats.updated:
+        parts.append(f"[cyan]{stats.updated} updated[/cyan]")
+    if stats.renamed:
+        parts.append(f"{stats.renamed} renamed")
+    if stats.archived:
+        parts.append(f"[yellow]{stats.archived} archived[/yellow]")
+    if stats.settling:
+        parts.append(f"[dim]{stats.settling} settling[/dim]")
+    if stats.errors:
+        parts.append(f"[red]{stats.errors} error(s)[/red]")
+
+    changed = stats.new + stats.updated + stats.renamed + stats.archived
+    if changed or stats.errors:
+        summary = ", ".join(parts)
+        console.print(
+            f"[green]✓ Pull complete[/green] — {summary}"
+            f"  [dim]· {stats.unchanged} unchanged[/dim]"
+        )
+    elif stats.settling:
+        console.print(
+            "[green]✓ Pull complete[/green] — "
+            f"[dim]{stats.settling} page(s) recently edited; they'll be written once they settle "
+            "(~5 min). Run `notionwiki pull` again shortly.[/dim]"
+        )
+    elif full:
+        console.print(f"[green]✓ Up to date[/green] — {stats.unchanged} page(s), nothing changed.")
+    else:
+        console.print(
+            "[green]✓ Up to date[/green] — no changes since the last pull.  "
+            "[dim]Run `notionwiki pull --full` to re-check everything.[/dim]"
+        )
 
 
 @app.command()

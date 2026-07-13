@@ -40,6 +40,15 @@ def test_download_asset_dedupes_identical_content(tmp_path: Path):
     assert len(list(assets_dir.iterdir())) == 1
 
 
+def test_download_asset_leaves_non_http_urls_untouched(tmp_path: Path):
+    """Empty/relative/data/internal references must not crash the pull — they are
+    returned unchanged with no network call (no respx mock needed)."""
+    assets_dir = tmp_path / "assets"
+    for ref in ("", "/relative/path.png", "data:image/png;base64,AAAA", "notion://page/x"):
+        assert download_asset(ref, assets_dir) == ref
+    assert not assets_dir.exists()
+
+
 @respx.mock
 def test_download_asset_falls_back_to_content_type_extension(tmp_path: Path):
     content = b"gif-bytes"

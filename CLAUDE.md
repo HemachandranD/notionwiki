@@ -57,10 +57,14 @@ uv run notionwiki --help              # run the CLI in place (alias: `uv run nw`
   empty selection = pull everything shared, unchanged behavior), `pull.py` (`PullRunner`
   orchestration; applies the scope filter to the page stream).
 - `cli.py` — Typer app: `init` (interactive wizard), `pull`, `status`, `open`, `graph`, `lint`,
-  `service install|uninstall|status`, `daemon`. Welcome banner suppressed on `--json`/`--quiet`/
-  non-TTY output (§8.2). `init` uses `questionary` for real-TTY selection (masked-token feedback,
-  checkbox multi-select of pages/databases with an "All" option), probing prompt_toolkit once and
-  falling back to line prompts on unsupported terminals (Git Bash/mintty) and piped input.
+  `config show|token|pages|databases`, `service install|uninstall|status`, `daemon`. Welcome
+  banner suppressed on `--json`/`--quiet`/non-TTY output (§8.2). `init` uses `questionary` for
+  real-TTY selection (masked-token feedback, checkbox multi-select of pages/databases with an
+  "All" option), probing prompt_toolkit once and falling back to line prompts on unsupported
+  terminals (Git Bash/mintty) and piped input; the `config` subcommands reuse the same helpers to
+  update the token/page-scope/databases after init without re-running the whole wizard. At import
+  the CLI reconfigures stdout/stderr to UTF-8 (`_force_utf8_output`) so the `✓`/arrow glyphs in
+  its output can't raise `UnicodeEncodeError` on a legacy cp1252 Windows console (esp. when piped).
 - `schedule/` — one `Scheduler` implementation per OS (`windows.py` schtasks, `macos.py` launchd,
   `linux.py` systemd user timer + headless Secret Service detection), dispatched by
   `detect_scheduler()`.
