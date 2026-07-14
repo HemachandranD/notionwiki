@@ -1,0 +1,79 @@
+name: Publish to npm
+
+# Fires on every push to main, but only actually publishes when package.json's
+# version no longer matches what's live on the npm registry — so a normal
+# push does nothing, and a version bump is the trigger. No manual tagging
+# required; `workflow_dispatch` is there as a manual escape hatch.
+on:
+  push:
+    branches: [main]
+    paths:
+      - package.json
+  workflow_dispatch: {}
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          LOCAL_VERSION=$(node -p "require('./package.json').version")
+          PUBLISHED_VERSION=$(npm view notionwiki version 2>/dev/null || echo "none")
+          echo "local=$LOCAL_VERSION published=$PUBLISHED_VERSION"
+          echo "version=$LOCAL_VERSION" >> "$GITHUB_OUTPUT"
+          if [ "$LOCAL_VERSION" != "$PUBLISHED_VERSION" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  test:
+    needs: check-version
+    if: needs.check-version.outputs.changed == 'true'
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.12"
+      - run: uv sync --extra graph --extra daemon --group dev
+      - run: uv run pytest
+      - run: uv run ruff check src tests
+
+  publish:
+    needs: [check-version, test]
+    if: needs.check-version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write # required for OIDC trusted publishing + provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      # Trusted publishing needs npm >= 11.5.1; Node 20's bundled npm predates that.
+      - run: npm install -g npm@latest
+      # No NODE_AUTH_TOKEN / NPM_TOKEN secret: npm exchanges this job's GitHub
+      # OIDC token (via id-token: write above) for a short-lived publish token,
+      # once notionwiki's npmjs.com "Trusted Publisher" is configured for this
+      # repo + this workflow file. --provenance is implied by trusted
+      # publishing but kept explicit for clarity.
+      - run: npm publish --provenance
+      - name: Tag the release
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ needs.check-version.outputs.version }}"
+          generate_release_notes: true
