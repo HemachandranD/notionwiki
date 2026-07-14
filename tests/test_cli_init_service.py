@@ -98,6 +98,74 @@ def test_init_with_database_selection(tmp_path: Path, state_env, monkeypatch):
     assert config.databases[0].name == "Reading Notes"
 
 
+def test_init_offers_to_update_stale_agent_docs(tmp_path: Path, state_env, monkeypatch):
+    wiki_root = tmp_path / "existing-wiki"
+    wiki_root.mkdir()
+    (wiki_root / "CLAUDE.md").write_text("# custom\nmy own notes\n", encoding="utf-8")
+    (wiki_root / "AGENTS.md").write_text("# custom\nmy own notes\n", encoding="utf-8")
+
+    fake_client = InitFakeClient(
+        pages=[make_raw_page("root1", "Home", last_edited_time="2026-07-09T14:00:00.000Z")],
+        database_objects=[],
+    )
+    monkeypatch.setattr(cli_module, "NotionClient", lambda token: fake_client)
+
+    result = runner.invoke(
+        app,
+        ["init"],
+        input="\n".join(
+            [
+                str(wiki_root),
+                "fake-token",
+                "1",
+                "n",
+                "1",
+                "n",
+                "y",  # 7. stale CLAUDE.md/AGENTS.md found — update to latest template? yes
+            ]
+        )
+        + "\n",
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert "custom" not in (wiki_root / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "custom" not in (wiki_root / "AGENTS.md").read_text(encoding="utf-8")
+
+
+def test_init_declines_to_update_stale_agent_docs(tmp_path: Path, state_env, monkeypatch):
+    wiki_root = tmp_path / "existing-wiki2"
+    wiki_root.mkdir()
+    (wiki_root / "CLAUDE.md").write_text("# custom\nmy own notes\n", encoding="utf-8")
+    (wiki_root / "AGENTS.md").write_text("# custom\nmy own notes\n", encoding="utf-8")
+
+    fake_client = InitFakeClient(
+        pages=[make_raw_page("root1", "Home", last_edited_time="2026-07-09T14:00:00.000Z")],
+        database_objects=[],
+    )
+    monkeypatch.setattr(cli_module, "NotionClient", lambda token: fake_client)
+
+    result = runner.invoke(
+        app,
+        ["init"],
+        input="\n".join(
+            [
+                str(wiki_root),
+                "fake-token",
+                "1",
+                "n",
+                "1",
+                "n",
+                "n",  # 7. stale CLAUDE.md/AGENTS.md found — update to latest template? no
+            ]
+        )
+        + "\n",
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert (wiki_root / "CLAUDE.md").read_text(encoding="utf-8") == "# custom\nmy own notes\n"
+    assert (wiki_root / "AGENTS.md").read_text(encoding="utf-8") == "# custom\nmy own notes\n"
+
+
 def test_service_status_reports_not_installed(monkeypatch):
     from notion_wiki.schedule.base import ScheduleStatus
 

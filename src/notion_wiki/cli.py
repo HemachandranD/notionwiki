@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import json as jsonlib
+import os
 import re
 import subprocess
 import sys
@@ -30,6 +31,7 @@ from notion_wiki.paths import (
 from notion_wiki.raw_index import find_source, list_raw_sources
 from notion_wiki.schedule.base import detect_scheduler
 from notion_wiki.store.db import StateDB
+from notion_wiki.token import ENV_VAR as TOKEN_ENV_VAR
 from notion_wiki.token import get_token, set_token
 
 BRAND = "notionwiki"
@@ -178,10 +180,27 @@ There is no `sync`/`push` — this bridge is pull-only.
 
 
 def _seed_agent_docs(wiki_root: Path) -> None:
+    """Write CLAUDE.md/AGENTS.md if missing. If either already exists but no longer
+    matches the template shipped by this version, ask before touching it — these
+    files are agent-maintained (§7) and may carry customizations, so an update is
+    opt-in rather than silently applied on every `init` re-run."""
+    stale: list[tuple[Path, str]] = []
     for filename in ("CLAUDE.md", "AGENTS.md"):
         path = wiki_root / filename
+        template = _AGENT_DOC_TEMPLATE.format(filename=filename)
         if not path.exists():
-            path.write_text(_AGENT_DOC_TEMPLATE.format(filename=filename), encoding="utf-8")
+            path.write_text(template, encoding="utf-8")
+        elif path.read_text(encoding="utf-8") != template:
+            stale.append((path, template))
+
+    if stale and _confirm(
+        f"{' and '.join(p.name for p, _ in stale)} "
+        f"{'differs' if len(stale) == 1 else 'differ'} from the latest notionwiki template. "
+        "Update to the latest version? This discards any customizations.",
+        default=False,
+    ):
+        for path, template in stale:
+            path.write_text(template, encoding="utf-8")
 
 
 def _extract_page_id_from_url(url: str) -> str:
@@ -445,7 +464,12 @@ def init() -> None:
         "Where should the wiki live? (defaults to this location)", default_root, qmark="1"
     )
 
-    token = _ask_token("Paste your Notion integration token", qmark="2")
+    env_token = os.environ.get(TOKEN_ENV_VAR)
+    if env_token:
+        token = env_token.strip()
+        console.print(f"2 Notion integration token  [dim]from ${TOKEN_ENV_VAR}[/dim]")
+    else:
+        token = _ask_token("Paste your Notion integration token", qmark="2")
     client = NotionClient(token)
     try:
         pages = [
