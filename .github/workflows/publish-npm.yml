@@ -43,7 +43,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v8
+      - uses: astral-sh/setup-uv@v8.3.2
         with:
           python-version: "3.12"
       - run: uv sync --extra graph --extra daemon --group dev
@@ -57,15 +57,8 @@ jobs:
     permissions:
       contents: write
       id-token: write # required for OIDC trusted publishing + provenance
-      # Pushing the release tag below reaches a commit whose tree includes
-      # .github/workflows/*, which GITHUB_TOKEN refuses to touch without
-      # this explicit grant ("refusing to allow a GitHub App to create or
-      # update workflow ... without `workflows` permission").
-      workflows: write
     steps:
       - uses: actions/checkout@v7
-        with:
-          persist-credentials: true
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -81,13 +74,12 @@ jobs:
       # repo + this workflow file. --provenance is implied by trusted
       # publishing but kept explicit for clarity.
       - run: npm publish --provenance
-      - name: Tag the release
-        run: |
-          VERSION="${{ needs.check-version.outputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag "v$VERSION"
-          git push origin "v$VERSION"
+      # Creates the release *and* the underlying tag via the Releases REST
+      # API against this run's commit - not a raw `git push`, so it only
+      # needs contents: write and never hits GITHUB_TOKEN's hard block on
+      # pushing refs that reach .github/workflows/* (there's no permission
+      # that lifts that block for the automatic token; the API path just
+      # doesn't go through it).
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: "v${{ needs.check-version.outputs.version }}"
