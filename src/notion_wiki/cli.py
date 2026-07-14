@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import json as jsonlib
 import re
+import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -42,6 +43,12 @@ config_app = typer.Typer(
     help="View or update saved settings (token, pages, databases) without re-running init",
 )
 app.add_typer(config_app, name="config")
+
+
+def _scheduler_error_detail(exc: Exception) -> str:
+    if isinstance(exc, subprocess.CalledProcessError):
+        return (exc.stderr or exc.stdout or "").strip() or f"exit code {exc.returncode}"
+    return str(exc)
 
 
 def _force_utf8_output() -> None:
@@ -146,6 +153,13 @@ This is the root of an LLM Wiki fed by notionwiki. Ingestion history lives in
   - `wiki/concepts/`, `wiki/entities/`, `wiki/sources/` — page types: concept, entity,
     source-summary
 - `outputs/` — generated reports/answers: products *of* the wiki, not part of it.
+
+## Retrieval
+
+Before answering a question, read `wiki/index.md` first — it's the master catalog. Drill into
+the ~10 pages it points to that look relevant, then answer. Don't scan `raw/` or the whole
+`wiki/` tree up front; only open a `raw/notion/*.md` source directly when you need to verify or
+re-derive something a wiki page cites.
 
 ## Rules
 
@@ -488,12 +502,21 @@ def init() -> None:
 
     if install_schedule:
         scheduler = detect_scheduler()
-        warnings = scheduler.install(interval_minutes)
-        console.print(
-            f"[green]Registered[/green] {scheduler.name} schedule (every {interval_minutes} min)."
-        )
-        for warning in warnings:
-            console.print(f"[yellow]Warning:[/yellow] {warning}")
+        try:
+            warnings = scheduler.install(interval_minutes)
+        except (RuntimeError, subprocess.CalledProcessError) as exc:
+            console.print(
+                f"[red]Failed to register the {scheduler.name} schedule:[/red] "
+                f"{_scheduler_error_detail(exc)}"
+            )
+            console.print("You can retry later with `notionwiki service install`.")
+        else:
+            console.print(
+                f"[green]Registered[/green] {scheduler.name} schedule "
+                f"(every {interval_minutes} min)."
+            )
+            for warning in warnings:
+                console.print(f"[yellow]Warning:[/yellow] {warning}")
 
     console.print(
         "\nRun `notionwiki pull` for a first sync, or point your assistant at the wiki root."
@@ -513,7 +536,14 @@ def service_install(
     config = load_config()
     interval = interval_minutes or config.interval_minutes
     scheduler = detect_scheduler()
-    warnings = scheduler.install(interval)
+    try:
+        warnings = scheduler.install(interval)
+    except (RuntimeError, subprocess.CalledProcessError) as exc:
+        console.print(
+            f"[red]Failed to register the {scheduler.name} schedule:[/red] "
+            f"{_scheduler_error_detail(exc)}"
+        )
+        raise typer.Exit(1) from exc
     console.print(f"[green]Installed[/green] {scheduler.name} schedule (every {interval} min).")
     for warning in warnings:
         console.print(f"[yellow]Warning:[/yellow] {warning}")

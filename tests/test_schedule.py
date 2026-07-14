@@ -1,6 +1,8 @@
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from notion_wiki.schedule.base import detect_scheduler
 from notion_wiki.schedule.linux import LinuxScheduler
 from notion_wiki.schedule.macos import MacScheduler
@@ -27,7 +29,7 @@ def test_detect_scheduler_matches_platform(monkeypatch):
     assert detect_scheduler().name == "linux"
 
 
-def test_windows_install_invokes_schtasks_with_logon_repeat(monkeypatch):
+def test_windows_install_invokes_schtasks_with_minute_repeat(monkeypatch):
     recorder = RecordingRun()
     monkeypatch.setattr("notion_wiki.schedule.windows.subprocess.run", recorder)
     monkeypatch.setattr("notion_wiki.schedule.windows._schtasks", lambda: "schtasks")
@@ -37,8 +39,29 @@ def test_windows_install_invokes_schtasks_with_logon_repeat(monkeypatch):
     assert warnings == []
     args = recorder.calls[0]
     assert "/Create" in args
-    assert "ONLOGON" in args
-    assert "2" in args  # /RI 2
+    assert "MINUTE" in args
+    assert "/MO" in args
+    assert "2" in args  # /MO 2
+    # /RI + /DU on an ONLOGON trigger is rejected by schtasks itself; must not regress to it.
+    assert "ONLOGON" not in args
+    assert "/RI" not in args
+    assert "/DU" not in args
+
+
+def test_windows_install_raises_runtime_error_with_schtasks_detail(monkeypatch):
+    def failing_run(args, **kwargs):
+        raise subprocess.CalledProcessError(
+            returncode=5,
+            cmd=args,
+            output="",
+            stderr="ERROR: The options /RI, /DU, ... are not applicable.",
+        )
+
+    monkeypatch.setattr("notion_wiki.schedule.windows.subprocess.run", failing_run)
+    monkeypatch.setattr("notion_wiki.schedule.windows._schtasks", lambda: "schtasks")
+
+    with pytest.raises(RuntimeError, match="not applicable"):
+        WindowsScheduler().install(interval_minutes=1)
 
 
 def test_windows_uninstall_deletes_task(monkeypatch):
