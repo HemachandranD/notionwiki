@@ -19,6 +19,9 @@ jobs:
       version: ${{ steps.check.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
       - id: check
         run: |
           LOCAL_VERSION=$(node -p "require('./package.json').version")
@@ -58,9 +61,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
-      # Trusted publishing needs npm >= 11.5.1; Node 20's bundled npm predates that.
+      # Trusted publishing needs npm >= 11.5.1, and npm@latest itself now
+      # requires Node >= 22.22.2/24.15.0/26 (EBADENGINE otherwise) - Node 24
+      # satisfies both. This only affects the publish job's tooling, not the
+      # `engines.node` end users need to run the CLI wrapper (package.json).
       - run: npm install -g npm@latest
       # No NODE_AUTH_TOKEN / NPM_TOKEN secret: npm exchanges this job's GitHub
       # OIDC token (via id-token: write above) for a short-lived publish token,
