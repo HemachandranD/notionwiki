@@ -159,8 +159,29 @@ const TYPE_COLOR = {
 function colorFor(t) { return TYPE_COLOR[t] || "#8b93a7"; }
 function shortName(id) { return String(id).split("/").pop().replace(/-/g, " "); }
 
+// Node radius in graph units. Must match nodeRelSize * sqrt(nodeVal) below, which
+// is what force-graph actually draws -- the label sits just outside it.
+function nodeRadius(node) { return 4 * Math.sqrt(1 + (node.backlinks || 0)); }
+function labelVisible(node, scale) {
+  return scale >= 1.2 || node.id === highlightNode;
+}
+function labelMetrics(node, scale) {
+  const size = Math.max(10 / scale, 3);
+  return {
+    label: shortName(node.id),
+    size,
+    font: `${size}px system-ui, sans-serif`,
+    x: node.x + nodeRadius(node) + 2 / scale,
+  };
+}
+
 const PANEL_DEFAULT_TITLE = "notionwiki graph";
 const PANEL_DEFAULT_DESC = "Hover a node for details · scroll to zoom · drag to pan.";
+
+// Set by a click so the zoom it kicks off cannot immediately blank the panel;
+// cleared by hovering another node or closing the drawer.
+let pinnedNodeId = null;
+let highlightNode = null;
 
 // Single writer for the info panel so hover and click can never disagree, and so
 // leaving a node resets it instead of stranding the previous node's summary.
@@ -198,7 +219,6 @@ async function main() {
     if (neighbors.has(e.target)) neighbors.get(e.target).add(e.source);
   });
 
-  let highlightNode = null;
 
   const Graph = ForceGraph()(el)
     .graphData({
@@ -216,25 +236,41 @@ async function main() {
     .nodeCanvasObjectMode(() => "after")
     .nodeCanvasObject((node, ctx, scale) => {
       // Draw a label beside the node once zoomed in enough (Obsidian-style).
-      if (scale < 1.2 && node.id !== highlightNode) return;
-      const label = shortName(node.id);
-      const fontSize = Math.max(10 / scale, 3);
-      ctx.font = `${fontSize}px system-ui, sans-serif`;
+      if (!labelVisible(node, scale)) return;
+      const m = labelMetrics(node, scale);
+      ctx.font = m.font;
       ctx.fillStyle = "#cbd5e1";
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
-      const r = Math.sqrt(1 + (node.backlinks || 0)) * 4 / scale;
-      ctx.fillText(label, node.x + r + 2 / scale, node.y);
+      ctx.fillText(m.label, m.x, node.y);
+    })
+    // Hit-testing uses its own canvas, so anything drawn above must be repainted
+    // here or it is not clickable. Without this force-graph only registers the
+    // dot, and clicking a node's label -- the obvious target -- does nothing.
+    .nodePointerAreaPaint((node, color, ctx, scale) => {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, nodeRadius(node), 0, 2 * Math.PI);
+      ctx.fill();
+      if (!labelVisible(node, scale)) return;
+      const m = labelMetrics(node, scale);
+      ctx.font = m.font;
+      ctx.fillRect(m.x, node.y - m.size / 2, ctx.measureText(m.label).width, m.size);
     })
     .onNodeHover((node) => {
       highlightNode = node ? node.id : null;
       el.style.cursor = node ? "pointer" : "default";
+      // Leaving a node normally resets the panel, but not while a click has it
+      // pinned: centerAt/zoom slide the node out from under the cursor, which
+      // fires this with null a moment after the click set the panel.
+      if (!node && pinnedNodeId) return;
+      pinnedNodeId = null;
       setPanel(node);
     })
     .onNodeClick((node) => {
-      // Clicking zooms and re-centers, which moves the node out from under the
-      // cursor, so onNodeHover cannot be relied on to fire afterwards. Update the
-      // panel here too, otherwise the summary a click produces is down to luck.
+      // Clicking zooms and re-centers, so onNodeHover cannot be relied on to fire
+      // for the clicked node. Pin and paint the panel here instead.
+      pinnedNodeId = node.id;
       setPanel(node);
       Graph.centerAt(node.x, node.y, 600);
       Graph.zoom(4, 600);
@@ -256,7 +292,11 @@ async function main() {
 }
 
 const drawer = document.getElementById("drawer");
-function closeDrawer() { drawer.classList.remove("open"); }
+function closeDrawer() {
+  drawer.classList.remove("open");
+  pinnedNodeId = null;
+  setPanel(null);
+}
 document.getElementById("d-close").addEventListener("click", closeDrawer);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 
