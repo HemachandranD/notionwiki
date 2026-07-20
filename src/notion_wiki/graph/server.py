@@ -159,6 +159,26 @@ const TYPE_COLOR = {
 function colorFor(t) { return TYPE_COLOR[t] || "#8b93a7"; }
 function shortName(id) { return String(id).split("/").pop().replace(/-/g, " "); }
 
+const PANEL_DEFAULT_TITLE = "notionwiki graph";
+const PANEL_DEFAULT_DESC = "Hover a node for details · scroll to zoom · drag to pan.";
+
+// Single writer for the info panel so hover and click can never disagree, and so
+// leaving a node resets it instead of stranding the previous node's summary.
+function setPanel(node) {
+  const title = document.getElementById("p-title");
+  const meta = document.getElementById("p-meta");
+  const desc = document.getElementById("p-desc");
+  if (!node) {
+    title.textContent = PANEL_DEFAULT_TITLE;
+    meta.textContent = "";
+    desc.textContent = PANEL_DEFAULT_DESC;
+    return;
+  }
+  title.textContent = shortName(node.id);
+  meta.textContent = `${node.type} · ${node.backlinks || 0} backlinks · ${node.id}`;
+  desc.textContent = node.description || "No description — add one to this page's frontmatter.";
+}
+
 async function main() {
   const data = await (await fetch("/graph.json")).json();
   const el = document.getElementById("graph");
@@ -209,18 +229,13 @@ async function main() {
     .onNodeHover((node) => {
       highlightNode = node ? node.id : null;
       el.style.cursor = node ? "pointer" : "default";
-      const panel = {
-        title: document.getElementById("p-title"),
-        meta: document.getElementById("p-meta"),
-        desc: document.getElementById("p-desc"),
-      };
-      if (node) {
-        panel.title.textContent = shortName(node.id);
-        panel.meta.textContent = `${node.type} · ${node.backlinks || 0} backlinks · ${node.id}`;
-        panel.desc.textContent = node.description || "";
-      }
+      setPanel(node);
     })
     .onNodeClick((node) => {
+      // Clicking zooms and re-centers, which moves the node out from under the
+      // cursor, so onNodeHover cannot be relied on to fire afterwards. Update the
+      // panel here too, otherwise the summary a click produces is down to luck.
+      setPanel(node);
       Graph.centerAt(node.x, node.y, 600);
       Graph.zoom(4, 600);
       openDrawer(node.id);

@@ -41,6 +41,25 @@ def test_root_redirects_to_graph(tmp_path: Path):
     assert response.headers["location"] == "/graph"
 
 
+def test_node_click_updates_the_info_panel(tmp_path: Path):
+    # Clicking zooms and re-centers, so the node moves out from under the cursor and
+    # onNodeHover may not fire again. Both handlers must go through setPanel, or a
+    # click leaves the panel showing whatever was hovered last.
+    client = TestClient(create_app(tmp_path))
+    html = client.get("/graph").text
+
+    click_handler = html.split(".onNodeClick(")[1].split("openDrawer(")[0]
+    assert "setPanel(node)" in click_handler
+
+    hover_handler = html.split(".onNodeHover(")[1].split(".onNodeClick(")[0]
+    assert "setPanel(node)" in hover_handler
+
+    # setPanel must handle the empty case, so leaving a node resets the panel
+    # instead of stranding the previous node's summary.
+    set_panel = html.split("function setPanel(")[1].split("async function main")[0]
+    assert "if (!node) {" in set_panel
+
+
 def test_vendored_force_graph_js_is_served(tmp_path: Path):
     client = TestClient(create_app(tmp_path))
     response = client.get("/force-graph.min.js")
