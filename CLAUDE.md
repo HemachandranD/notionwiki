@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-notionwiki is a **one-way ingestion bridge** that pulls a Notion workspace into the immutable Raw Sources layer of an LLM Wiki, inspired by Karpathy's LLM Wiki (`llm_wiki.md`). Notion is the source (authored from anywhere); a scheduled job pulls it, converts pages to markdown, and files them as raw source material an assistant then builds a wiki on top of. The bridge is implemented (roadmap 0.1–0.5, version 0.1.5): a `uv`-managed Python package (`src/notion_wiki/`) with a `notionwiki` CLI, an npm wrapper for distribution, and a full mocked test suite — see **Current State** below.
+notionwiki is a **one-way ingestion bridge** that pulls a Notion workspace into the immutable Raw Sources layer of an LLM Wiki, inspired by Karpathy's LLM Wiki (`llm_wiki.md`). Notion is the source (authored from anywhere); a scheduled job pulls it, converts pages to markdown, and files them as raw source material an assistant then builds a wiki on top of. The bridge is implemented (roadmap 0.1–0.5, version 0.1.6): a `uv`-managed Python package (`src/notion_wiki/`) with a `notionwiki` CLI, an npm wrapper for distribution, and a full mocked test suite — see **Current State** below.
 
 ## Design
 
